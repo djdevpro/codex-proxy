@@ -47,7 +47,7 @@ jobs:
         run: bun run build --target=${{ matrix.target }}
       - name: Package binary
         run: tar -C dist -czf codex-proxy-${{ matrix.target }}.tar.gz codex-proxy-${{ matrix.target }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.target }}
           path: codex-proxy-${{ matrix.target }}.tar.gz
