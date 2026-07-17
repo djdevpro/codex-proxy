@@ -1,0 +1,37 @@
+{
+  "name": "codex-local-proxy",
+  "version": "1.0.0",
+  "description": "A local OpenAI- and Ollama-compatible gateway for the Codex CLI.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/djdevpro/codex-proxy.git"
+  },
+  "homepage": "https://github.com/djdevpro/codex-proxy#readme",
+  "bugs": {
+    "url": "https://github.com/djdevpro/codex-proxy/issues"
+  },
+  "private": true,
+  "type": "module",
+  "engines": {
+    "bun": ">=1.3.0"
+  },
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "start": "bun run src/index.ts",
+    "test": "bun test ./test",
+    "test:watch": "bun test --watch ./test",
+    "typecheck": "tsc --noEmit",
+    "check": "bun run typecheck && bun run test && bun run version:check",
+    "version:check": "bun run scripts/check-version.ts",
+    "smoke": "bun run test/cli-smoke.ts",
+    "build": "bun run scripts/build.ts",
+    "build:linux": "bun run scripts/build.ts --all-linux",
+    "build:macos": "bun run scripts/build.ts --all-macos",
+    "build:release": "bun run scripts/build.ts --all-release",
+    "clean": "bun run scripts/clean.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.9.3"
+  }
+}
