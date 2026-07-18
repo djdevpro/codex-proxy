@@ -150,7 +150,7 @@ Clients running inside Docker may not be able to reach a host service bound to l
 | `POST` | `/api/generate` | Ollama generation, including NDJSON |
 | `GET` | `/artifacts/:id/:filename` | Generated image download |
 
-OpenAI `developer` and legacy `system` messages are forwarded as per-request Codex `developer_instructions`. They keep their priority instead of being flattened into the user prompt; `user` and `assistant` messages remain in the conversational prompt.
+OpenAI `developer` and legacy `system` messages are forwarded as one per-request Codex `developer_instructions` value. This keeps their priority instead of flattening them into the user prompt, but it also means their original position is not preserved: a sliding instruction inserted during a later turn is promoted to the top for the whole proxied execution. Keep instruction messages at the beginning of the request, or start a fresh request when changing them mid-conversation.
 
 ## Local image input
 
