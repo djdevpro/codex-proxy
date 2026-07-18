@@ -124,7 +124,23 @@ Docker clients cannot usually reach a host service bound to loopback. If you del
 
 Metadata helpers such as `/v1/models/:id`, `/api/ps`, `/api/version`, and `/api/show` are also available.
 
-The first message is promoted to Codex `developer_instructions` only when its role is `developer` or legacy `system`. Any later instruction message stays in its original position in the conversational prompt, so sliding changes are not moved back to the top.
+### System prompts and sliding instructions
+
+Only the first message is promoted to Codex `developer_instructions`, and only when its role is `developer` or legacy `system`. Later instruction messages stay in their original conversational position:
+
+```json
+{
+  "messages": [
+    {"role": "system", "content": "Always answer in French."},
+    {"role": "user", "content": "First question"},
+    {"role": "assistant", "content": "First answer"},
+    {"role": "system", "content": "From now on, answer as JSON."},
+    {"role": "user", "content": "Next question"}
+  ]
+}
+```
+
+Here, the first `system` becomes the Codex developer instruction. The sliding `system` remains between the two turns and is handled by Codex as part of the ordered conversation; it is never moved back to the top.
 
 ## Images
 
