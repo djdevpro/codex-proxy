@@ -1,26 +1,26 @@
-<h1 align="center">Codex Local Proxy</h1>
+<h1 align="center">Codex Proxy</h1>
 
 <p align="center">
-  <img src="./assets/banner.png" alt="Codex Local Proxy — a local gateway connecting Codex to OpenAI and Ollama clients" width="100%" />
+  <img src="./assets/banner-v2.png" alt="Codex Proxy — an OpenAI SDK gateway powered by the Codex CLI" width="100%" />
 </p>
 
 <p align="center">
   <strong>Plug your Codex CLI into the tools you already love.</strong><br />
-  A small, local-first gateway that speaks OpenAI and Ollama.
+  A small, local-first OpenAI SDK gateway powered by your Codex CLI.
 </p>
 
 <p align="center">
   <a href="https://github.com/djdevpro/codex-proxy/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/djdevpro/codex-proxy/actions/workflows/ci.yml/badge.svg" /></a>
   <a href="https://github.com/djdevpro/codex-proxy/releases"><img alt="GitHub release" src="https://img.shields.io/github/v/release/djdevpro/codex-proxy?display_name=tag&sort=semver" /></a>
   <a href="https://bun.sh"><img alt="Bun 1.3+" src="https://img.shields.io/badge/Bun-1.3%2B-fbf0df?logo=bun&logoColor=14151a" /></a>
-  <img alt="OpenAI compatible" src="https://img.shields.io/badge/OpenAI-compatible-10a37f?logo=openai&logoColor=white" />
+  <a href="https://github.com/openai/openai-node"><img alt="OpenAI SDK compatible" src="https://img.shields.io/badge/OpenAI%20SDK-compatible-10a37f?logo=openai&logoColor=white" /></a>
   <img alt="Ollama compatible" src="https://img.shields.io/badge/Ollama-compatible-111111?logo=ollama&logoColor=white" />
   <img alt="Windows, Linux, and macOS" src="https://img.shields.io/badge/Windows%20%7C%20Linux%20%7C%20macOS-supported-f5a623" />
 </p>
 
 ---
 
-Codex Local Proxy turns an authenticated `codex` installation into a loopback API for OpenAI SDKs, Ollama-compatible apps, Open WebUI, automations, and scripts. No database, Docker, API key, or proxy token is required for local use.
+Codex Proxy turns an authenticated `codex` installation into a loopback API for OpenAI SDKs, Ollama-compatible apps, Open WebUI, automations, and scripts. No database, Docker, API key, or proxy token is required for local use.
 
 > [!IMPORTANT]
 > This is a community bridge, not an official OpenAI endpoint. Availability, limits, authentication, and model access still come from your Codex account.
@@ -39,7 +39,8 @@ Codex Local Proxy turns an authenticated `codex` installation into a loopback AP
 
 ```mermaid
 flowchart LR
-    A["OpenAI / Ollama client"] --> P["Codex Local Proxy"]
+    A["OpenAI SDK"] --> P["Codex Proxy"]
+    B["Compatible clients"] --> P
     P --> C["codex exec"]
     C --> O["Your Codex account"]
 ```
@@ -76,6 +77,10 @@ The service is ready at `http://127.0.0.1:8787`. You can alternatively run a sta
 ### 3. Connect a client
 
 OpenAI SDK:
+
+```sh
+npm install openai
+```
 
 ```ts
 import OpenAI from "openai";
@@ -226,7 +231,7 @@ You can also run the Release workflow manually for an existing tag. Standalone b
 
 - The Responses API and OpenAI function-call translation are not implemented.
 - Each request starts an ephemeral `codex exec`; conversation state belongs to the client.
-- Usage tokens are reported as zero because the CLI does not expose reliable counts here.
+- Usage tokens are currently reported as zero because the proxy does not yet map Codex CLI usage events.
 - Model availability depends on the authenticated Codex account.
 
 ---

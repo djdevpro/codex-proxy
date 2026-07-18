@@ -1,6 +1,6 @@
 # Security
 
-Codex Local Proxy launches an authenticated local Codex CLI. Treat access to the proxy as access to that Codex session.
+Codex Proxy launches an authenticated local Codex CLI. Treat access to the proxy as access to that Codex session.
 
 ## Safe defaults
 

@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve Codex Local Proxy.
+Thanks for helping improve Codex Proxy.
 
 ## Local setup
 

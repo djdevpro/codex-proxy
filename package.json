@@ -1,5 +1,5 @@
 {
-  "name": "codex-local-proxy",
+  "name": "codex-proxy",
   "version": "1.0.0",
   "description": "A local OpenAI- and Ollama-compatible gateway for the Codex CLI.",
   "repository": {

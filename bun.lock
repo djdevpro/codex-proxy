@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "codex-local-proxy",
+      "name": "codex-proxy",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "^5.9.3",

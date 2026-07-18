@@ -3,7 +3,7 @@ import { createCodexRunner } from "./codex";
 import { createServer } from "./server";
 import { VERSION } from "./version";
 
-const HELP = `Codex Local Proxy v${VERSION}
+const HELP = `Codex Proxy v${VERSION}
 
 Usage:
   codex-proxy [--help] [--version]
@@ -32,10 +32,10 @@ try {
   assertSafeBinding(config);
   const server = createServer({ config, runner: createCodexRunner(config) });
   const url = `http://${server.hostname}:${server.port}`;
-  console.log(`\n  Codex Local Proxy v${VERSION}\n  Ready on ${url}\n  OpenAI: ${url}/v1\n  Ollama: ${url}\n`);
+  console.log(`\n  Codex Proxy v${VERSION}\n  Ready on ${url}\n  OpenAI: ${url}/v1\n  Ollama: ${url}\n`);
 
   const shutdown = () => {
-    console.log("Stopping Codex Local Proxy...");
+    console.log("Stopping Codex Proxy...");
     server.stop();
     process.exit(0);
   };
