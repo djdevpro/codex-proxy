@@ -189,9 +189,11 @@ CODEX_PROXY_PORT=9090 bun run start
 ## Quality checks
 
 ```sh
-bun run check      # strict TypeScript + deterministic tests
-bun run smoke      # one real end-to-end request through Codex
-bun run build      # binary for the current OS and architecture
+bun run test:unit         # fast in-process tests
+bun run test:integration  # real server process + executable dummy Codex CLI
+bun run check             # strict TypeScript + both deterministic test suites
+bun run smoke             # optional end-to-end request through your authenticated Codex CLI
+bun run build             # binary for the current OS and architecture
 bun run build:linux
 bun run build:macos
 bun run build:windows
@@ -201,7 +203,7 @@ bun run build:windows
 
 The repository includes two workflows:
 
-- **CI** validates types and tests, compiles Linux x64, runs the binary, and keeps it as a workflow artifact.
+- **CI** runs unit tests and a black-box integration suite with a dummy Codex executable, then compiles Linux x64, runs the binary, and keeps it as a workflow artifact. GitHub never needs Codex credentials.
 - **Release** builds Windows x64 plus Linux and macOS binaries for x64 and ARM64, packages them, generates SHA-256 checksums, and attaches everything to a GitHub Release.
 
 Publish from the command line:
@@ -233,7 +235,7 @@ bun run dev
 bun run test:watch
 ```
 
-The active application lives in `src/`, deterministic integration tests live in `test/`, and release tooling lives in `scripts/` plus `.github/workflows/`.
+The active application lives in `src/`. Unit tests live directly in `test/`; the black-box suite and its deterministic dummy CLI live in `test/integration/` and `test/fixtures/`. Release tooling lives in `scripts/` plus `.github/workflows/`.
 
 ---
 

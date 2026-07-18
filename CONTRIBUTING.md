@@ -9,7 +9,7 @@ bun install
 bun run check
 ```
 
-Use `bun run dev` while working on the server. Run `bun run smoke` only when you have an authenticated Codex CLI and want to make a real end-to-end request.
+Use `bun run dev` while working on the server. `bun run test:integration` starts a separate proxy process with the deterministic dummy Codex executable, so it is safe in CI. Run `bun run smoke` only when you have an authenticated Codex CLI and want to make a live end-to-end request.
 
 ## Pull requests
 

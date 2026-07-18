@@ -18,8 +18,10 @@
   "scripts": {
     "dev": "bun run src/index.ts",
     "start": "bun run src/index.ts",
-    "test": "bun test ./test",
-    "test:watch": "bun test --watch ./test",
+    "test": "bun run test:unit && bun run test:integration",
+    "test:unit": "bun test ./test/config.test.ts ./test/server.test.ts",
+    "test:integration": "bun test ./test/integration",
+    "test:watch": "bun test --watch ./test/config.test.ts ./test/server.test.ts",
     "typecheck": "tsc --noEmit",
     "check": "bun run typecheck && bun run test && bun run version:check",
     "version:check": "bun run scripts/check-version.ts",
