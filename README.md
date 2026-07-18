@@ -11,7 +11,6 @@
 
 <p align="center">
   <a href="https://github.com/djdevpro/codex-proxy/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/djdevpro/codex-proxy/actions/workflows/ci.yml/badge.svg" /></a>
-  <a href="https://github.com/djdevpro/codex-proxy/releases"><img alt="GitHub release" src="https://img.shields.io/github/v/release/djdevpro/codex-proxy?display_name=tag&sort=semver" /></a>
   <a href="https://bun.sh"><img alt="Bun 1.3+" src="https://img.shields.io/badge/Bun-1.3%2B-fbf0df?logo=bun&logoColor=14151a" /></a>
   <a href="https://github.com/openai/openai-node"><img alt="OpenAI SDK compatible" src="https://img.shields.io/badge/OpenAI%20SDK-compatible-10a37f?logo=openai&logoColor=white" /></a>
   <img alt="Ollama compatible" src="https://img.shields.io/badge/Ollama-compatible-111111?logo=ollama&logoColor=white" />
