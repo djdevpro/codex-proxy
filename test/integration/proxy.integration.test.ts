@@ -20,11 +20,21 @@ interface DummyInvocation {
   images: string[];
   ephemeral: boolean;
   skipGitRepoCheck: boolean;
+  json: boolean;
+  developerConfig: string;
 }
 
 interface StreamChunk {
   message?: { content?: string };
   done?: boolean;
+}
+
+interface PublicArtifact {
+  id: string;
+  type: "image";
+  filename: string;
+  mime_type: string;
+  url: string;
 }
 
 let proxy: Bun.Subprocess<"ignore", "pipe", "pipe"> | undefined;
@@ -113,6 +123,7 @@ beforeAll(
         CODEX_PROXY_MODEL: "gpt-5.6-terra",
         CODEX_PROXY_SANDBOX: "read-only",
         CODEX_PROXY_TIMEOUT_MS: "5000",
+        CODEX_HOME: join(temporaryDirectory, "codex-home"),
       },
       stdin: "ignore",
       stdout: "pipe",
@@ -158,6 +169,7 @@ describe("proxy process with a dummy Codex CLI", () => {
         model: "gpt-5.6-sol",
         messages: [
           { role: "system", content: "Be exact." },
+          { role: "developer", content: "Answer concisely." },
           { role: "user", content: "integration ping" },
         ],
       }),
@@ -171,10 +183,12 @@ describe("proxy process with a dummy Codex CLI", () => {
       command: "exec",
       model: "gpt-5.6-sol",
       sandbox: "read-only",
-      prompt: "system: Be exact.\n\nuser: integration ping",
+      prompt: "user: integration ping",
       images: [],
       ephemeral: true,
       skipGitRepoCheck: true,
+      json: true,
+      developerConfig: 'developer_instructions="system: Be exact.\\n\\ndeveloper: Answer concisely."',
     });
   });
 
@@ -201,6 +215,77 @@ describe("proxy process with a dummy Codex CLI", () => {
     expect(invocation.model).toBe("gpt-5.6-terra");
     expect(invocation.prompt).toBe("user: stream integration");
     expect(rows.at(-1)?.done).toBe(true);
+  });
+
+  test("publishes an image created by the dummy CLI", async () => {
+    const response = await fetch(`${baseUrl}/api/chat`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ messages: [{ role: "user", content: "create __DUMMY_IMAGE__" }] }),
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      message: { content: string };
+      artifacts: PublicArtifact[];
+    };
+    const artifact = body.artifacts[0];
+
+    expect(artifact).toMatchObject({ type: "image", filename: "dummy-image.png", mime_type: "image/png" });
+    expect(body.message.content).toContain(artifact?.url ?? "missing artifact URL");
+
+    const image = await fetch(artifact?.url ?? "");
+    expect(image.status).toBe(200);
+    expect(image.headers.get("content-type")).toBe("image/png");
+    expect((await image.arrayBuffer()).byteLength).toBeGreaterThan(50);
+  });
+
+  test("returns multiple images using the OpenAI Images API schema", async () => {
+    const response = await fetch(`${baseUrl}/v1/images/generations`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: "gpt-image-2",
+        prompt: "Create two distinct proxy mascots.",
+        n: 2,
+      }),
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      created: number;
+      data: Array<{ b64_json: string }>;
+      x_codex_artifacts: PublicArtifact[];
+    };
+
+    expect(body.created).toBeInteger();
+    expect(body.data).toHaveLength(2);
+    expect(body.x_codex_artifacts).toHaveLength(2);
+    for (const image of body.data) expect(Buffer.from(image.b64_json, "base64").byteLength).toBeGreaterThan(50);
+  });
+
+  test("supports URL responses and validates the requested image count", async () => {
+    const response = await fetch(`${baseUrl}/v1/images/generations`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ prompt: "Create three icons.", n: 3, response_format: "url" }),
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: Array<{ url: string }> };
+    expect(body.data).toHaveLength(3);
+    expect((await fetch(body.data[2]?.url ?? "")).headers.get("content-type")).toBe("image/png");
+
+    const invalid = await fetch(`${baseUrl}/v1/images/generations`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ prompt: "Too many", n: 11 }),
+    });
+    expect(invalid.status).toBe(400);
+
+    const unsupported = await fetch(`${baseUrl}/v1/images/generations`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ prompt: "Transparent icon", background: "transparent" }),
+    });
+    expect(unsupported.status).toBe(501);
   });
 
   test("maps a failing CLI process to a gateway error", async () => {

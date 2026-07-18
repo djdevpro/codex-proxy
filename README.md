@@ -36,6 +36,7 @@ Codex Local Proxy turns an authenticated `codex` installation into a loopback AP
 | 🌊 | SSE streaming for OpenAI clients and NDJSON for Ollama clients |
 | 🧠 | Typed model registry with `gpt-5.6-terra` and `gpt-5.6-sol` |
 | 🖼️ | Local vision inputs forwarded to `codex exec --image` |
+| 🎨 | Generated images exposed as local HTTP artifacts |
 | 🔎 | Automatic Codex discovery on Windows, Linux, and macOS |
 | 🛡️ | Loopback-only by default with a read-only Codex sandbox |
 | 📦 | Standalone Windows x64 plus Linux/macOS x64 and ARM64 binaries |
@@ -140,12 +141,16 @@ Clients running inside Docker may not be able to reach a host service bound to l
 | `GET` | `/v1/models` | OpenAI model list |
 | `GET` | `/v1/models/:id` | OpenAI model details |
 | `POST` | `/v1/chat/completions` | OpenAI chat, including SSE |
+| `POST` | `/v1/images/generations` | OpenAI image generation, including `n` images |
 | `GET` | `/api/tags` | Ollama model list |
 | `GET` | `/api/ps` | Ollama process list |
 | `GET` | `/api/version` | Ollama-style version |
 | `POST` | `/api/show` | Ollama model metadata |
 | `POST` | `/api/chat` | Ollama chat, including NDJSON |
 | `POST` | `/api/generate` | Ollama generation, including NDJSON |
+| `GET` | `/artifacts/:id/:filename` | Generated image download |
+
+OpenAI `developer` and legacy `system` messages are forwarded as per-request Codex `developer_instructions`. They keep their priority instead of being flattened into the user prompt; `user` and `assistant` messages remain in the conversational prompt.
 
 ## Local image input
 
@@ -164,7 +169,50 @@ Pass a local `file://` URL in an OpenAI content part. The proxy converts it into
 }
 ```
 
-If the Codex session exposes the `imagegen` skill and its built-in tool, you can ask the agent to generate an image through chat. The proxy does not pretend that the resulting project file is an OpenAI Image API response, so `/v1/images/generations` is intentionally not emulated.
+## Generated image output
+
+For OpenAI-compatible applications, use the Images API route. It follows the conventional `{ created, data: [...] }` response and supports `n` from 1 to 10. Each `data` entry contains one `b64_json` image by default:
+
+```sh
+response=$(curl -s http://127.0.0.1:8787/v1/images/generations \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-image-2",
+    "prompt": "Two cheerful illustrations containing the word Bonjour.",
+    "n": 2,
+    "size": "1024x1024",
+    "quality": "high"
+  }')
+
+echo "$response" | jq
+echo "$response" | jq -r '.data[0].b64_json' | base64 --decode > bonjour-1.png
+echo "$response" | jq -r '.data[1].b64_json' | base64 --decode > bonjour-2.png
+```
+
+For local URL output, request `"response_format": "url"`; each item in `data` then contains a temporary proxy URL. This legacy-compatible convenience is useful with `curl`, while GPT Image-style base64 remains the default.
+
+Generated images are kept by Codex under `~/.codex/generated_images/`. The proxy discovers every image belonging to the current Codex thread, so multiple tool calls and multiple files are preserved. It also includes local metadata in the namespaced `x_codex_artifacts` extension:
+
+```json
+{
+  "created": 1713833628,
+  "data": [
+    {"b64_json": "..."},
+    {"b64_json": "..."}
+  ],
+  "x_codex_artifacts": [{
+    "id": "...",
+    "type": "image",
+    "filename": "generated.png",
+    "mime_type": "image/png",
+    "url": "http://127.0.0.1:8787/artifacts/.../generated.png"
+  }]
+}
+```
+
+You can still ask for image generation through `/api/chat` or `/v1/chat/completions`. Those text APIs receive Markdown image links plus an `artifacts` extension because Chat Completions has no standard generated-image output shape.
+
+`gpt-image-*` names on this route are compatibility aliases: generation is performed by the authenticated Codex agent through its available `imagegen` skill, not by a direct OpenAI Images API key. `n`, `size`, `quality`, and background constraints are injected as per-request Codex developer instructions while the creative prompt stays untouched. `size` and `quality` are therefore best effort rather than native tool guarantees. PNG output is supported; native transparency and partial-image streaming are not. Artifact URLs are unguessable local capability URLs and remain registered until the proxy restarts.
 
 ## Configuration
 

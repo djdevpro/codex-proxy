@@ -90,4 +90,58 @@ describe("completions", () => {
     expect(ollama).toContain('"done":true');
     expect(ollama).toContain("world");
   });
+
+  test("maps OpenAI system and developer roles to Codex developer instructions", async () => {
+    let received: Parameters<CodexRunner>[0] | undefined;
+    const base = start(async (input) => {
+      received = input;
+      return "OK";
+    });
+    const response = await fetch(`${base}/v1/chat/completions`, {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({
+        messages: [
+          { role: "system", content: "You are precise." },
+          { role: "developer", content: "Reply in French." },
+          { role: "user", content: "Hello" },
+        ],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(received?.prompt).toBe("user: Hello");
+    expect(received?.developerInstructions).toBe("system: You are precise.\n\ndeveloper: Reply in French.");
+  });
+});
+
+describe("image generation", () => {
+  test("translates size, quality, and image count into agent guidance", async () => {
+    let prompt = "";
+    let developerInstructions = "";
+    const base = start(async (input) => {
+      prompt = input.prompt;
+      developerInstructions = input.developerInstructions ?? "";
+      return { content: "", artifacts: [] };
+    });
+    const response = await fetch(`${base}/v1/images/generations`, {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({
+        model: "gpt-image-2",
+        prompt: "A friendly proxy mascot.",
+        n: 2,
+        size: "1024x1536",
+        quality: "high",
+        background: "opaque",
+      }),
+    });
+
+    expect(response.status).toBe(502);
+    expect(prompt).toBe("A friendly proxy mascot.");
+    expect(developerInstructions).toContain("Generate exactly 2 image variants");
+    expect(developerInstructions).toContain("Target canvas: 1024x1536");
+    expect(developerInstructions).toContain("Quality target: high");
+    expect(developerInstructions).toContain("fully opaque background");
+  });
 });

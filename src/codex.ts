@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { generatedImagesForThread } from "./artifacts";
 import type { ProxyConfig } from "./config";
 import type { CodexRunner, Message } from "./types";
 
@@ -56,28 +57,43 @@ function localImagePath(url: string): string {
   return fileURLToPath(url);
 }
 
-export function preparePrompt(messages: Message[]): { prompt: string; images: string[] } {
+export function preparePrompt(messages: Message[]): {
+  prompt: string;
+  images: string[];
+  developerInstructions?: string;
+} {
   const images: string[] = [];
-  const prompt = messages
-    .map(({ role, content }) => {
-      if (typeof content === "string") return `${role}: ${content}`;
-      const text = content
+  const instructions: string[] = [];
+  const conversation: string[] = [];
+
+  for (const { role, content } of messages) {
+    const text =
+      typeof content === "string"
+        ? content
+        : content
         .flatMap((part) => {
           if (part.type === "text") return [part.text];
           images.push(localImagePath(part.image_url.url));
           return [];
         })
         .join("\n");
-      return `${role}: ${text}`;
-    })
-    .join("\n\n");
-  return { prompt, images };
+
+    if (role === "system" || role === "developer") instructions.push(`${role}: ${text}`);
+    else conversation.push(`${role}: ${text}`);
+  }
+
+  const developerInstructions = instructions.join("\n\n");
+  return {
+    prompt: conversation.join("\n\n") || "Continue according to the supplied instructions.",
+    images,
+    ...(developerInstructions ? { developerInstructions } : {}),
+  };
 }
 
 export function createCodexRunner(config: ProxyConfig): CodexRunner {
   const command = resolveCodexCommand(config.codexCommand);
 
-  return async ({ prompt, images, model }, onOutput) => {
+  return async ({ prompt, images, model, developerInstructions }, onOutput) => {
     const args = [
       command,
       "exec",
@@ -85,11 +101,15 @@ export function createCodexRunner(config: ProxyConfig): CodexRunner {
       "--skip-git-repo-check",
       "--color",
       "never",
+      "--json",
       "--sandbox",
       config.sandbox,
       "--model",
       model,
     ];
+    if (developerInstructions) {
+      args.push("--config", `developer_instructions=${JSON.stringify(developerInstructions)}`);
+    }
     for (const image of images) args.push("--image", image);
     args.push(prompt);
 
@@ -104,23 +124,46 @@ export function createCodexRunner(config: ProxyConfig): CodexRunner {
     const stderrPromise = new Response(child.stderr).text();
     const reader = child.stdout.getReader();
     const decoder = new TextDecoder();
-    let output = "";
+    let buffer = "";
+    let rawOutput = "";
+    let threadId: string | undefined;
+    let finalMessage = "";
+
+    const consumeLine = (line: string) => {
+      const value = line.trim();
+      if (!value) return;
+      try {
+        const event = JSON.parse(value) as {
+          type?: string;
+          thread_id?: string;
+          item?: { type?: string; text?: string };
+        };
+        if (event.type === "thread.started" && event.thread_id) threadId = event.thread_id;
+        if (event.type === "item.completed" && event.item?.type === "agent_message" && event.item.text) {
+          finalMessage = event.item.text;
+        }
+      } catch {
+        rawOutput += `${line}\n`;
+      }
+    };
 
     try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        output += chunk;
-        onOutput?.(chunk);
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) consumeLine(line);
       }
-      const tail = decoder.decode();
-      output += tail;
-      if (tail) onOutput?.(tail);
+      buffer += decoder.decode();
+      consumeLine(buffer);
 
       const [exitCode, stderr] = await Promise.all([child.exited, stderrPromise]);
       if (exitCode !== 0) throw new Error(stderr.trim() || `Codex exited with code ${exitCode}.`);
-      return output.trim();
+      const content = finalMessage || rawOutput.trim();
+      if (content) onOutput?.(content);
+      return { content, artifacts: await generatedImagesForThread(threadId) };
     } finally {
       clearTimeout(timeout);
     }
