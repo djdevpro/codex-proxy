@@ -169,7 +169,9 @@ describe("proxy process with a dummy Codex CLI", () => {
         model: "gpt-5.6-sol",
         messages: [
           { role: "system", content: "Be exact." },
-          { role: "developer", content: "Answer concisely." },
+          { role: "user", content: "first ping" },
+          { role: "assistant", content: "first pong" },
+          { role: "system", content: "From now on, answer as JSON." },
           { role: "user", content: "integration ping" },
         ],
       }),
@@ -183,12 +185,13 @@ describe("proxy process with a dummy Codex CLI", () => {
       command: "exec",
       model: "gpt-5.6-sol",
       sandbox: "read-only",
-      prompt: "user: integration ping",
+      prompt:
+        "user: first ping\n\nassistant: first pong\n\nsystem: From now on, answer as JSON.\n\nuser: integration ping",
       images: [],
       ephemeral: true,
       skipGitRepoCheck: true,
       json: true,
-      developerConfig: 'developer_instructions="system: Be exact.\\n\\ndeveloper: Answer concisely."',
+      developerConfig: 'developer_instructions="system: Be exact."',
     });
   });
 

@@ -66,7 +66,7 @@ export function preparePrompt(messages: Message[]): {
   const instructions: string[] = [];
   const conversation: string[] = [];
 
-  for (const { role, content } of messages) {
+  for (const [index, { role, content }] of messages.entries()) {
     const text =
       typeof content === "string"
         ? content
@@ -78,7 +78,7 @@ export function preparePrompt(messages: Message[]): {
         })
         .join("\n");
 
-    if (role === "system" || role === "developer") instructions.push(`${role}: ${text}`);
+    if (index === 0 && (role === "system" || role === "developer")) instructions.push(`${role}: ${text}`);
     else conversation.push(`${role}: ${text}`);
   }
 

@@ -91,7 +91,7 @@ describe("completions", () => {
     expect(ollama).toContain("world");
   });
 
-  test("maps OpenAI system and developer roles to Codex developer instructions", async () => {
+  test("maps only the initial OpenAI instruction to Codex developer instructions", async () => {
     let received: Parameters<CodexRunner>[0] | undefined;
     const base = start(async (input) => {
       received = input;
@@ -110,8 +110,35 @@ describe("completions", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(received?.prompt).toBe("user: Hello");
-    expect(received?.developerInstructions).toBe("system: You are precise.\n\ndeveloper: Reply in French.");
+    expect(received?.prompt).toBe("developer: Reply in French.\n\nuser: Hello");
+    expect(received?.developerInstructions).toBe("system: You are precise.");
+  });
+
+  test("keeps later system messages in chronological conversation order", async () => {
+    let received: Parameters<CodexRunner>[0] | undefined;
+    const base = start(async (input) => {
+      received = input;
+      return "OK";
+    });
+    const response = await fetch(`${base}/v1/chat/completions`, {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({
+        messages: [
+          { role: "system", content: "Initial rule." },
+          { role: "user", content: "First turn" },
+          { role: "assistant", content: "First answer" },
+          { role: "system", content: "From now on, answer as JSON." },
+          { role: "user", content: "Second turn" },
+        ],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(received?.developerInstructions).toBe("system: Initial rule.");
+    expect(received?.prompt).toBe(
+      "user: First turn\n\nassistant: First answer\n\nsystem: From now on, answer as JSON.\n\nuser: Second turn",
+    );
   });
 });
 
