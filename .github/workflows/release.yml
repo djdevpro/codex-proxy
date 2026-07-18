@@ -33,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [linux-x64, linux-arm64, macos-x64, macos-arm64]
+        target: [linux-x64, linux-arm64, macos-x64, macos-arm64, windows-x64]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -46,7 +46,12 @@ jobs:
       - name: Compile ${{ matrix.target }}
         run: bun run build --target=${{ matrix.target }}
       - name: Package binary
-        run: tar -C dist -czf codex-proxy-${{ matrix.target }}.tar.gz codex-proxy-${{ matrix.target }}
+        run: |
+          binary="codex-proxy-${{ matrix.target }}"
+          if [[ "${{ matrix.target }}" == windows-* ]]; then
+            binary="${binary}.exe"
+          fi
+          tar -C dist -czf codex-proxy-${{ matrix.target }}.tar.gz "$binary"
       - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.target }}

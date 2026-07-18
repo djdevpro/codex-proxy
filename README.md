@@ -17,7 +17,7 @@
   <img alt="OpenAI compatible" src="https://img.shields.io/badge/OpenAI-compatible-10a37f?logo=openai&logoColor=white" />
   <img alt="Ollama compatible" src="https://img.shields.io/badge/Ollama-compatible-111111?logo=ollama&logoColor=white" />
   <img alt="Local first" src="https://img.shields.io/badge/network-local--first-4cc9f0" />
-  <img alt="Linux and macOS" src="https://img.shields.io/badge/releases-Linux%20%7C%20macOS-f5a623?logo=githubactions&logoColor=white" />
+  <img alt="Windows, Linux, and macOS" src="https://img.shields.io/badge/releases-Windows%20%7C%20Linux%20%7C%20macOS-f5a623?logo=githubactions&logoColor=white" />
 </p>
 
 ---
@@ -38,7 +38,7 @@ Codex Local Proxy turns an authenticated `codex` installation into a loopback AP
 | 🖼️ | Local vision inputs forwarded to `codex exec --image` |
 | 🔎 | Automatic Codex discovery on Windows, Linux, and macOS |
 | 🛡️ | Loopback-only by default with a read-only Codex sandbox |
-| 📦 | Standalone Linux and macOS binaries built by GitHub Actions |
+| 📦 | Standalone Windows x64 plus Linux/macOS x64 and ARM64 binaries |
 
 ## How it works
 
@@ -191,8 +191,10 @@ CODEX_PROXY_PORT=9090 bun run start
 ```sh
 bun run check      # strict TypeScript + deterministic tests
 bun run smoke      # one real end-to-end request through Codex
+bun run build      # binary for the current OS and architecture
 bun run build:linux
 bun run build:macos
+bun run build:windows
 ```
 
 ## Releases
@@ -200,7 +202,7 @@ bun run build:macos
 The repository includes two workflows:
 
 - **CI** validates types and tests, compiles Linux x64, runs the binary, and keeps it as a workflow artifact.
-- **Release** builds `linux-x64`, `linux-arm64`, `macos-x64`, and `macos-arm64`, packages them, generates SHA-256 checksums, and attaches everything to a GitHub Release.
+- **Release** builds Windows x64 plus Linux and macOS binaries for x64 and ARM64, packages them, generates SHA-256 checksums, and attaches everything to a GitHub Release.
 
 Publish from the command line:
 

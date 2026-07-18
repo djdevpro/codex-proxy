@@ -27,6 +27,7 @@
     "build": "bun run scripts/build.ts",
     "build:linux": "bun run scripts/build.ts --all-linux",
     "build:macos": "bun run scripts/build.ts --all-macos",
+    "build:windows": "bun run scripts/build.ts --all-windows",
     "build:release": "bun run scripts/build.ts --all-release",
     "clean": "bun run scripts/clean.ts"
   },
