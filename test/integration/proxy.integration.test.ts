@@ -113,12 +113,6 @@ beforeAll(
 
     const codexHome = join(temporaryDirectory, "codex-home");
     await mkdir(codexHome);
-    await Bun.write(join(codexHome, "models_cache.json"), JSON.stringify({ models: [
-      { slug: "gpt-6.1-sol", visibility: "list", display_name: "GPT-6.1 Sol",
-        default_reasoning_level: "low", supported_reasoning_levels: [{ effort: "low" }, { effort: "max" }] },
-      { slug: "gpt-6-astra", visibility: "list", display_name: "GPT-6 Astra",
-        default_reasoning_level: "medium", supported_reasoning_levels: [{ effort: "medium" }, { effort: "max" }] },
-    ] }));
     const port = await reservePort();
     baseUrl = `http://127.0.0.1:${port}`;
     proxy = Bun.spawn([process.execPath, "run", "src/index.ts"], {
@@ -155,6 +149,26 @@ const headers = {
   authorization: `Bearer ${TOKEN}`,
   "content-type": "application/json",
 };
+
+test("passes browser images as real local image inputs for exec and SSE, then cleans them", async () => {
+  const image = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+afo4AAAAASUVORK5CYII=";
+  for (const stream of [false, true]) {
+    const response = await fetch(`${baseUrl}/v1/chat/completions`, { method: "POST", headers, body: JSON.stringify({ stream,
+      messages: [{ role: "user", content: [{ type: "text", text: "__DUMMY_ATTACHMENT__ Describe image and document" },
+        { type: "image_url", image_url: { url: `data:image/png;base64,${image}` } },
+        { type: "file", file: { filename: "document.txt", file_data: `data:text/plain;base64,${Buffer.from("Document été").toString("base64")}` } }] }],
+    }) });
+    expect(response.status).toBe(200);
+    const content = stream
+      ? (await response.text()).split("\n\n").filter((event) => event.startsWith("data: {")).map((event) => JSON.parse(event.slice(6)).choices?.[0]?.delta?.content ?? "").join("")
+      : (await response.json()).choices[0].message.content;
+    const result = JSON.parse(content);
+    expect(result.imageBytes).toEqual([Buffer.from(image,"base64").length]);
+    expect(result.prompt).toContain("Document été");
+    expect(result.images.length).toBe(1);
+    expect(await Bun.file(result.images[0]).exists()).toBe(false);
+  }
+});
 
 describe("proxy process with a dummy Codex CLI", () => {
   test("starts a real HTTP server and enforces authentication", async () => {
@@ -328,7 +342,7 @@ test("forwards JSON Schema through an ephemeral file and accepts long Windows pr
   expect(invocation.prompt).toBe("user: " + prompt);
 });
 
-test("publishes cached reasoning metadata and forwards Max to the CLI", async () => {
+test("discovers every model page, filters hidden entries and forwards observed reasoning to the CLI", async () => {
   const catalog = await fetch(baseUrl + "/v1/models").then((response) => response.json());
   expect(catalog.default_model).toBe("gpt-6.1-sol");
   expect(catalog.data[0]).toMatchObject({

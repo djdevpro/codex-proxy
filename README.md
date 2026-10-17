@@ -134,7 +134,7 @@ Metadata helpers such as `/v1/models/:id`, `/api/ps`, `/api/version`, and `/api/
 
 The proxy prefers GPT-6.1 Sol (`gpt-6.1-sol`) when it appears in the local Codex catalog, then GPT-6 Astra (`gpt-6-astra`). It preserves other visible catalog entries and explicit `CODEX_PROXY_MODEL` or request `model` overrides. It does not copy the default from your personal Codex configuration.
 
-`GET /v1/models` includes `default_model` and, when supplied by the local cache, each model's `display_name`, `supported_reasoning_efforts`, and `default_reasoning_effort`. A cached model is not a guarantee of account access. When the cache is missing, the two current models are offered as fallbacks without invented reasoning metadata.
+`GET /v1/models` queries Codex app-server `model/list`, follows every page, and excludes hidden entries. It includes `default_model`, `source`, `fetched_at`, attachment `capabilities`, and each model's `display_name`, `supported_reasoning_efforts`, `default_reasoning_effort`, `input_modalities`, and `is_default` when available. Results are cached for at most 30 seconds; use `/v1/models?refresh=1` to request a fresh discovery. Errors return HTTP 503 with `model_discovery_error`; no static or stale model list is substituted. Discovery never starts a generation. Explicit model overrides must exist in the returned catalog.
 
 Set `reasoning_effort` in a chat request to choose a level, including Max:
 
@@ -248,7 +248,13 @@ Here, the first `system` becomes the Codex developer instruction. The sliding `s
 
 ## Images
 
-### Local image input
+### Browser attachments and local image input
+
+Browser clients can send images as `image_url` content parts with a base64 data URL. Supported image types are PNG, JPEG, WebP and GIF; the decoded signature must match the media type. The selected model must advertise image input. The proxy writes image bytes to a private temporary directory for Codex and deletes them when the request completes, fails or is cancelled.
+
+UTF-8 text documents use `{ "type": "file", "file": { "filename": "document.txt", "file_data": "data:text/plain;base64,..." } }`. Their decoded text is included as reference material in the conversation. PDF and Office files must first be extracted to text by the client; the local Codex input protocol has no generic binary document part. Audio and arbitrary binary files are not accepted by this bridge.
+
+Only user messages may carry attachments. A request may contain up to 8 attachments and 10 MiB of decoded attachment data in total, with the same 10 MiB limit per file. The HTTP JSON body limit is 16 MiB to allow base64 overhead and conversation text. Remote image URLs are not downloaded.
 
 Use a local `file://` URL in an OpenAI content part. The proxy forwards it to `codex exec --image`:
 
@@ -297,7 +303,6 @@ All settings are optional on loopback.
 | `CODEX_PROXY_HOST` | `127.0.0.1` | Listen address |
 | `CODEX_PROXY_PORT` | `8787` | Listen port |
 | `CODEX_PROXY_MODEL` | preferred available model | Explicit default model; overrides the `CODEX_MODEL` alias |
-| `CODEX_PROXY_MODELS` | Codex cache + current-model fallbacks when the cache is absent | Extra model IDs, comma-separated |
 | `CODEX_PROXY_ALLOWED_ORIGINS` | loopback HTTP(S) origins | Extra trusted browser origins, comma-separated |
 | `CODEX_PROXY_COMMAND` | auto-detected | Codex executable |
 | `CODEX_PROXY_SANDBOX` | `read-only` | Non-streaming Codex sandbox mode; streaming chat always uses read-only |

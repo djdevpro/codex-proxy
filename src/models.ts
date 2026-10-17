@@ -1,81 +1,76 @@
-import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { listCodexModels } from "./model-discovery";
 
-export const CodexModel = {
-  Gpt61Sol: "gpt-6.1-sol",
-  Gpt6Astra: "gpt-6-astra",
-} as const;
-
+// Preference order only: these names never add entries to the discovered catalog.
+export const CodexModel = { Gpt61Sol: "gpt-6.1-sol", Gpt6Astra: "gpt-6-astra" } as const;
 export type CodexModel = string;
-export const REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] as const;
-export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
-
+export type ReasoningEffort = string;
 export interface ModelMetadata {
   id: string;
   display_name?: string;
+  description?: string;
   supported_reasoning_efforts?: ReasoningEffort[];
   default_reasoning_effort?: ReasoningEffort;
+  input_modalities: string[];
+  is_default: boolean;
 }
+export interface ModelCatalog { models: ModelMetadata[]; fetchedAt: number }
+export type ModelCatalogProvider = (refresh?: boolean) => Promise<ModelCatalog>;
+const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+export const validModelId = (value: unknown): value is string => typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/.test(value);
+export const isReasoningEffort = (value: unknown): value is ReasoningEffort => typeof value === "string" && /^[a-z][a-z0-9_-]{0,63}$/.test(value);
 
-export function isReasoningEffort(value: unknown): value is ReasoningEffort {
-  return typeof value === "string" && (REASONING_EFFORTS as readonly string[]).includes(value);
-}
-
-const validModelId = (value: unknown): value is string =>
-  typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(value);
-
-/** Use only visible cached entries, with explicit additions and a fallback for a missing cache. */
-export function modelCatalog(cache: unknown, configured: string[] = []): ModelMetadata[] {
-  const rows = cache && typeof cache === "object" && "models" in cache && Array.isArray(cache.models) ? cache.models : [];
+export function modelCatalog(rows: unknown[]): ModelMetadata[] {
   const models = new Map<string, ModelMetadata>();
   for (const row of rows) {
-    if (!row || typeof row !== "object" || row.visibility !== "list" || !validModelId(row.slug)) continue;
-    const efforts: ReasoningEffort[] = Array.isArray(row.supported_reasoning_levels)
-      ? [...new Set<ReasoningEffort>(row.supported_reasoning_levels.flatMap((level: unknown) =>
-          level && typeof level === "object" && "effort" in level && isReasoningEffort(level.effort) ? [level.effort] : []))]
-      : [];
-    models.set(row.slug, {
-      id: row.slug,
-      ...(typeof row.display_name === "string" ? { display_name: row.display_name } : {}),
+    if (!record(row) || row.hidden === true || !validModelId(row.model ?? row.id)) continue;
+    const id = (row.model ?? row.id) as string;
+    const efforts = Array.isArray(row.supportedReasoningEfforts)
+      ? [...new Set(row.supportedReasoningEfforts.flatMap((entry) => record(entry) && isReasoningEffort(entry.reasoningEffort) ? [entry.reasoningEffort] : []))] : [];
+    models.set(id, {
+      id,
+      ...(typeof row.displayName === "string" ? { display_name: row.displayName } : {}),
+      ...(typeof row.description === "string" ? { description: row.description } : {}),
       ...(efforts.length ? { supported_reasoning_efforts: efforts } : {}),
-      ...(isReasoningEffort(row.default_reasoning_level) && efforts.includes(row.default_reasoning_level)
-        ? { default_reasoning_effort: row.default_reasoning_level } : {}),
+      ...(isReasoningEffort(row.defaultReasoningEffort) && efforts.includes(row.defaultReasoningEffort) ? { default_reasoning_effort: row.defaultReasoningEffort } : {}),
+      input_modalities: Array.isArray(row.inputModalities) ? row.inputModalities.filter((value): value is string => typeof value === "string") : ["text", "image"],
+      is_default: row.isDefault === true,
     });
   }
-  if (!models.size) for (const id of Object.values(CodexModel)) models.set(id, { id });
-  for (const id of configured.filter(validModelId)) if (!models.has(id)) models.set(id, { id });
-  const preferred = [CodexModel.Gpt61Sol, CodexModel.Gpt6Astra] as string[];
-  const priority = (id: string) => preferred.includes(id) ? preferred.indexOf(id) : preferred.length;
-  return [...models.values()].sort((a, b) => priority(a.id) - priority(b.id));
+  if (!models.size) throw new Error("Codex returned no available models. Check the local Codex session.");
+  return [...models.values()];
 }
 
-function cachedModels(): unknown {
-  try {
-    return JSON.parse(readFileSync(join(process.env.CODEX_HOME ?? join(homedir(), ".codex"), "models_cache.json"), "utf8"));
-  } catch { return undefined; }
+export function createModelCatalogProvider(command: () => string, options: { ttlMs?: number; now?: () => number; discover?: (command: string) => Promise<unknown[]> } = {}): ModelCatalogProvider {
+  let cached: ModelCatalog | undefined;
+  let pending: Promise<ModelCatalog> | undefined;
+  const now = options.now ?? Date.now;
+  return async (refresh = false) => {
+    if (!refresh && cached && now() - cached.fetchedAt < (options.ttlMs ?? 30_000)) return cached;
+    if (pending) return pending;
+    pending = (async () => {
+      const rows = await (options.discover ?? listCodexModels)(command());
+      const result = { models: modelCatalog(rows), fetchedAt: now() };
+      cached = result;
+      return result;
+    })();
+    try { return await pending; }
+    catch (error) { cached = undefined; throw error; }
+    finally { pending = undefined; }
+  };
 }
 
-// The cache is a catalog, not proof of account access. Codex checks access when a request runs.
-const configuredModels = [process.env.CODEX_PROXY_MODELS, process.env.CODEX_PROXY_MODEL, process.env.CODEX_MODEL]
-  .flatMap((value) => value?.split(",").map((model) => model.trim()).filter(Boolean) ?? []);
-export const MODEL_CATALOG = Object.freeze(modelCatalog(cachedModels(), configuredModels));
-export const CODEX_MODELS = Object.freeze(MODEL_CATALOG.map((model) => model.id));
-export const DEFAULT_MODEL = CODEX_MODELS[0]!;
-
-export function isCodexModel(value: unknown): value is CodexModel {
-  return typeof value === "string" && CODEX_MODELS.includes(value);
-}
-
-export function modelMetadata(id: string): ModelMetadata | undefined {
-  return MODEL_CATALOG.find((model) => model.id === id);
+export function defaultModel(models: ModelMetadata[], configured?: string): string {
+  if (configured) {
+    if (!models.some((model) => model.id === configured)) throw new Error(`Configured model ${configured} is not available from Codex.`);
+    return configured;
+  }
+  return [CodexModel.Gpt61Sol, CodexModel.Gpt6Astra].find((id) => models.some((model) => model.id === id))
+    ?? models.find((model) => model.is_default)?.id ?? models[0]!.id;
 }
 
 export function selectReasoningEffort(value: unknown, model: ModelMetadata | undefined): ReasoningEffort | undefined {
   if (value === undefined) return model?.default_reasoning_effort;
   if (!isReasoningEffort(value)) throw new Error("reasoning_effort must be a supported reasoning level.");
-  if (model?.supported_reasoning_efforts && !model.supported_reasoning_efforts.includes(value)) {
-    throw new Error("reasoning_effort is not supported by this model. Use one of: " + model.supported_reasoning_efforts.join(", ") + ".");
-  }
+  if (!model?.supported_reasoning_efforts?.includes(value)) throw new Error("reasoning_effort is not supported by this model. Use one of: " + (model?.supported_reasoning_efforts?.join(", ") ?? "the model default") + ".");
   return value;
 }

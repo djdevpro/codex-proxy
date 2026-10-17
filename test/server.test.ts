@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { ProxyConfig } from "../src/config";
-import { CODEX_MODELS, CodexModel } from "../src/models";
+import { CodexModel } from "../src/models";
+import { fixtureModels, modelIds as CODEX_MODELS } from "./fixtures/model-catalog";
 import { createServer } from "../src/server";
 import type { CodexRunner } from "../src/types";
 
@@ -17,13 +18,34 @@ let server: ReturnType<typeof createServer> | undefined;
 afterEach(() => server?.stop());
 
 function start(runner: CodexRunner = async () => "OK") {
-  server = createServer({ config, runner });
+  server = createServer({ config, runner, models: fixtureModels });
   return `http://${server.hostname}:${server.port}`;
 }
 
 const authHeaders = { authorization: "Bearer test-token", "content-type": "application/json" };
 
 describe("metadata", () => {
+  test("forwards explicit refresh and reports discovery failures without a substitute list", async () => {
+    let refresh: boolean | undefined;
+    let failed = false;
+    server = createServer({ config: { ...config, defaultModel: undefined }, runner: async () => "unused", models: async (value) => {
+      refresh = value;
+      if (failed) throw new Error("Codex is unavailable");
+      return { fetchedAt: 0, models: [{ id: "new-model", display_name: "New model", is_default: true, input_modalities: ["text"] }] };
+    } });
+    const base = `http://${server.hostname}:${server.port}`;
+    const response = await fetch(base + "/v1/models?refresh=1");
+    expect(refresh).toBe(true);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = await response.json();
+    expect(body.default_model).toBe("new-model");
+    expect(body.data[0].input_modalities).toEqual(["text"]);
+    expect(body.capabilities.max_total_bytes).toBe(10 * 1024 * 1024);
+    failed = true;
+    const failure = await fetch(base + "/v1/models?refresh=1");
+    expect(failure.status).toBe(503);
+    expect((await failure.json()).error.type).toBe("model_discovery_error");
+  });
   test("reports health and both model catalogs", async () => {
     const base = start();
     const health = await fetch(`${base}/health`).then((response) => response.json());

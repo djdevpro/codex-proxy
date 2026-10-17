@@ -1,7 +1,7 @@
 import type { ArtifactStore } from "./artifacts";
 import type { ProxyConfig } from "./config";
 import { failure, isAuthorized, json } from "./http";
-import { CODEX_MODELS, isCodexModel } from "./models";
+import { defaultModel, type ModelCatalogProvider } from "./models";
 import type { CodexResult, CodexRunner } from "./types";
 
 interface ImageGenerationRequest {
@@ -52,6 +52,7 @@ export async function handleImageGeneration(
   config: ProxyConfig,
   runner: CodexRunner,
   artifacts: ArtifactStore,
+  catalog: ModelCatalogProvider,
 ): Promise<Response> {
   if (!isAuthorized(request, config.token)) return failure("Invalid local proxy token.", 401, "authentication_error");
 
@@ -81,13 +82,14 @@ export async function handleImageGeneration(
     return failure("Streaming and partial images are not supported by the Codex CLI bridge.", 501, "not_supported");
   }
 
+  const available = await catalog();
   const model =
     body.model === undefined || (typeof body.model === "string" && body.model.startsWith("gpt-image-"))
-      ? config.defaultModel
-      : isCodexModel(body.model)
+      ? defaultModel(available.models, config.defaultModel)
+      : typeof body.model === "string" && available.models.some((entry) => entry.id === body.model)
         ? body.model
         : null;
-  if (!model) return failure(`model must be a GPT Image alias or one of: ${CODEX_MODELS.join(", ")}.`, 400);
+  if (!model) return failure(`model must be a GPT Image alias or one of: ${available.models.map((entry) => entry.id).join(", ")}.`, 400);
 
   const responseFormat = optionalEnum(body.response_format, ["b64_json", "url"] as const);
   if (responseFormat === null) return failure("response_format must be b64_json or url.", 400);

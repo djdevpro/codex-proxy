@@ -72,6 +72,7 @@ const invocation = {
   sandbox: optionValue("--sandbox"),
   prompt,
   images,
+  ...(prompt.includes("__DUMMY_ATTACHMENT__") ? { imageBytes: await Promise.all(images.map(async (path) => (await Bun.file(path).arrayBuffer()).byteLength)) } : {}),
   ephemeral: args.includes("--ephemeral"),
   skipGitRepoCheck: args.includes("--skip-git-repo-check"),
   json: args.includes("--json"),

@@ -1,4 +1,4 @@
-import { CODEX_MODELS, DEFAULT_MODEL, isCodexModel, type CodexModel } from "./models";
+import { validModelId, type CodexModel } from "./models";
 
 export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 
@@ -6,7 +6,7 @@ export interface ProxyConfig {
   host: string;
   port: number;
   token?: string;
-  defaultModel: CodexModel;
+  defaultModel?: CodexModel;
   codexCommand?: string;
   sandbox: SandboxMode;
   timeoutMs: number;
@@ -23,8 +23,8 @@ function positiveInteger(name: string, value: string | undefined, fallback: numb
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ProxyConfig {
-  const defaultModel = env.CODEX_PROXY_MODEL ?? env.CODEX_MODEL ?? DEFAULT_MODEL;
-  if (!isCodexModel(defaultModel)) throw new Error(`CODEX_PROXY_MODEL must be one of: ${CODEX_MODELS.join(", ")}.`);
+  const defaultModel = env.CODEX_PROXY_MODEL ?? env.CODEX_MODEL;
+  if (defaultModel !== undefined && !validModelId(defaultModel)) throw new Error("CODEX_PROXY_MODEL must be a model identifier.");
 
   const sandbox = (env.CODEX_PROXY_SANDBOX ?? "read-only") as SandboxMode;
   if (!SANDBOX_MODES.has(sandbox)) throw new Error("CODEX_PROXY_SANDBOX must be read-only, workspace-write, or danger-full-access.");

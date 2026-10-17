@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { rows } from "./model-catalog";
 
 export async function runDummyAppServer() {
   const send = (event: unknown) => process.stdout.write(JSON.stringify(event) + "\n");
@@ -19,6 +20,11 @@ export async function runDummyAppServer() {
       if (request.method === "initialize") {
         if (!params.capabilities?.optOutNotificationMethods?.includes("item/reasoning/textDelta")) throw new Error("Private reasoning must be excluded.");
         send({ id: request.id, result: {} });
+      } else if (request.method === "model/list") {
+        if (params.includeHidden !== false) throw new Error("Only visible models should be requested.");
+        send({ id: request.id, result: params.cursor === "second-page"
+          ? { data: [rows[1]], nextCursor: null }
+          : { data: [rows[0], { ...rows[0], model: "hidden-model", hidden: true }], nextCursor: "second-page" } });
       } else if (request.method === "config/read") {
         send({ id: request.id, result: { config: { mcp_servers: { fixture: { enabled: true, tool_timeout_sec: null }, "named.server": { enabled: true } } } } });
       } else if (request.method === "thread/start") {
@@ -59,6 +65,10 @@ export async function runDummyAppServer() {
         const text = prompt.includes("__DUMMY_INVALID_JSON__") ? "invalid JSON" : JSON.stringify({
           provider: "dummy-codex", command: "app-server", model: thread.model, prompt,
           reasoningEffort: params.effort, outputSchema: params.outputSchema,
+          ...(prompt.includes("__DUMMY_ATTACHMENT__") ? {
+            images: params.input.filter((part: { type: string }) => part.type === "localImage").map((part: { path: string }) => part.path),
+            imageBytes: await Promise.all(params.input.filter((part: { type: string }) => part.type === "localImage").map(async (part: { path: string }) => (await Bun.file(part.path).arrayBuffer()).byteLength)),
+          } : {}),
         });
         notify("item/started", { item: { type: "agentMessage", id: "answer", phase: "final_answer", text: "" } });
         for (let index = 0; index < text.length; index += 20) {
