@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
+import { runAppServer } from "./app-server";
 import { homedir, tmpdir } from "node:os";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -112,7 +113,9 @@ export function preparePrompt(messages: Message[]): {
 export function createCodexRunner(config: ProxyConfig): CodexRunner {
   const command = resolveCodexCommand(config.codexCommand);
 
-  return async ({ prompt, images, model, reasoningEffort, developerInstructions, outputSchema, jsonObject, signal }, onOutput, onProgress) => {
+  return async (input, onOutput, onProgress, onSummary, onCommentary) => {
+    if (onProgress || onSummary || onCommentary) return runAppServer(command, config, input, onOutput, onProgress, onSummary, onCommentary);
+    const { prompt, images, model, reasoningEffort, developerInstructions, outputSchema, jsonObject, signal } = input;
     signal?.throwIfAborted();
     let schemaDirectory: string | undefined;
     const args = [
@@ -187,9 +190,6 @@ export function createCodexRunner(config: ProxyConfig): CodexRunner {
         };
         if (event.type === "error" || event.type === "turn.failed") eventError = event.error?.message ?? event.message ?? "Codex turn failed.";
         if (event.type === "thread.started" && event.thread_id) threadId = event.thread_id;
-        // Emit only coarse execution metadata, never the CLI's reasoning text.
-        if (event.type === "turn.started" || (event.type?.startsWith("item.") && event.item?.type === "reasoning")) onProgress?.("thinking");
-        if (event.type?.startsWith("item.") && event.item?.type === "agent_message") onProgress?.("answering");
         if (event.type === "item.completed" && event.item?.type === "agent_message" && event.item.text) {
           finalMessage = event.item.text;
         }

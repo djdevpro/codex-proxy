@@ -9,6 +9,11 @@ function optionValue(name: string): string | undefined {
   return index === -1 ? undefined : args[index + 1];
 }
 
+if (args[0] === "app-server") {
+  const { runDummyAppServer } = await import("./dummy-app-server");
+  await runDummyAppServer();
+  process.exit(0);
+}
 if (args[0] !== "exec") {
   console.error(`Expected the exec command, received: ${args[0] ?? "nothing"}`);
   process.exit(2);

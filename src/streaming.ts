@@ -63,7 +63,21 @@ export function streamingResponse(endpoint: Endpoint, input: CodexInput, runner:
       execution.signal.throwIfAborted();
       // Flush before starting the CLI, including requests with a strict schema.
       progress("starting");
-      const result = await runner({ ...input, signal: execution.signal }, input.outputSchema || input.jsonObject ? undefined : send, progress);
+      const summary = (text: string) => {
+        if (!text) return;
+        sendEvent(openAi ? chunk({ reasoning_summary: text }) : {
+          model: input.model, done: false,
+          ...(endpoint === "ollama-chat" ? { message: { role: "assistant", content: "", reasoning_summary: text } } : { response: "", reasoning_summary: text }),
+        });
+      };
+      const commentary = (text: string) => {
+        if (!text) return;
+        sendEvent(openAi ? chunk({ commentary: text }) : {
+          model: input.model, done: false,
+          ...(endpoint === "ollama-chat" ? { message: { role: "assistant", content: "", commentary: text } } : { response: "", commentary: text }),
+        });
+      };
+      const result = await runner({ ...input, signal: execution.signal }, input.outputSchema || input.jsonObject ? undefined : send, progress, summary, commentary);
       execution.signal.throwIfAborted();
       const normalized = typeof result === "string" ? { content: result, artifacts: [] } : result;
       validateJsonOutput(normalized.content, input);

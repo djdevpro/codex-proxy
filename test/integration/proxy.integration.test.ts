@@ -400,3 +400,67 @@ test("aborting a streamed HTTP request kills its actual CLI process", async () =
   }
   expect(alive).toBe(false);
 });
+
+test("streams real public summary, commentary, and answer deltas in separate fields", async () => {
+  const response = await fetch(baseUrl + "/v1/chat/completions", {
+    method: "POST", headers,
+    body: JSON.stringify({ stream: true, messages: [{ role: "user", content: "live assistant" }] }),
+  });
+  const wire = await response.text();
+  const events = wire.split("\n\n").filter((line) => line.startsWith("data: {")).map((line) => JSON.parse(line.slice(6)));
+  const deltas = events.flatMap((event) => event.choices?.[0]?.delta ?? []);
+  expect(deltas.map((delta) => delta.reasoning_summary ?? "").join("")).toBe("Public summary.");
+  expect(deltas.map((delta) => delta.commentary ?? "").join("")).toBe("Public approach update.");
+  const chunks = deltas.filter((delta) => typeof delta.content === "string").map((delta) => delta.content);
+  expect(chunks.length).toBeGreaterThan(2);
+  expect(JSON.parse(chunks.join(""))).toMatchObject({ provider: "dummy-codex", command: "app-server", prompt: "user: live assistant" });
+  expect(wire).not.toContain("private fixture reasoning");
+});
+
+test("structured streaming excludes public commentary from the final JSON", async () => {
+  const schema = { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"], additionalProperties: false };
+  const response = await fetch(baseUrl + "/v1/chat/completions", {
+    method: "POST", headers,
+    body: JSON.stringify({ stream: true, messages: [{ role: "user", content: "structured live" }], response_format: { type: "json_schema", json_schema: { name: "test", schema, strict: true } } }),
+  });
+  const events = (await response.text()).split("\n\n").filter((line) => line.startsWith("data: {")).map((line) => JSON.parse(line.slice(6)));
+  const deltas = events.flatMap((event) => event.choices?.[0]?.delta ?? []);
+  expect(deltas.map((delta) => delta.commentary ?? "").join("")).toBe("Public approach update.");
+  const content = deltas.map((delta) => delta.content ?? "").join("");
+  expect(JSON.parse(content).outputSchema).toEqual(schema);
+  expect(content).not.toContain("Public approach");
+});
+
+test("app-server malformed JSON and failed turns are errors after stream headers", async () => {
+  for (const prompt of ["__DUMMY_INVALID_JSON__", "__DUMMY_FAILURE__"]) {
+    const response = await fetch(baseUrl + "/v1/chat/completions", {
+      method: "POST", headers,
+      body: JSON.stringify({ stream: true, messages: [{ role: "user", content: prompt }], response_format: { type: "json_object" } }),
+    });
+    const wire = await response.text();
+    expect(wire).toContain('"error":');
+    expect(wire).not.toContain('"finish_reason":"stop"');
+    expect(wire).not.toContain('"content":');
+  }
+});
+
+test("buffers unknown message phases until commentary can be separated", async () => {
+  const response = await fetch(baseUrl + "/v1/chat/completions", {
+    method: "POST", headers,
+    body: JSON.stringify({ stream: true, messages: [{ role: "user", content: "__DUMMY_DELAYED_PHASE__" }] }),
+  });
+  const events = (await response.text()).split("\n\n").filter((line) => line.startsWith("data: {")).map((line) => JSON.parse(line.slice(6)));
+  const deltas = events.flatMap((event) => event.choices?.[0]?.delta ?? []);
+  expect(deltas.map((delta) => delta.commentary ?? "").join("")).toBe("Public approach update.");
+  expect(JSON.parse(deltas.map((delta) => delta.content ?? "").join("")).prompt).toBe("user: __DUMMY_DELAYED_PHASE__");
+});
+
+test("reports an app-server transport crash without pretending completion", async () => {
+  const response = await fetch(baseUrl + "/v1/chat/completions", {
+    method: "POST", headers,
+    body: JSON.stringify({ stream: true, messages: [{ role: "user", content: "__DUMMY_CRASH__" }] }),
+  });
+  const wire = await response.text();
+  expect(wire).toContain('"error":');
+  expect(wire).not.toContain('"finish_reason":"stop"');
+});
