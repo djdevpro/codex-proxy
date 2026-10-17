@@ -347,3 +347,56 @@ test("publishes cached reasoning metadata and forwards Max to the CLI", async ()
   });
   expect(rejected.status).toBe(400);
 });
+
+test("sends progress before the CLI finishes without leaking reasoning text", async () => {
+  const marker = `progress-${Date.now()}`;
+  const response = await fetch(baseUrl + "/v1/chat/completions", {
+    method: "POST", headers,
+    body: JSON.stringify({ stream: true, messages: [{ role: "user", content: `__DUMMY_DELAY__ ${marker}` }], response_format: { type: "json_object" } }),
+  });
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let received = "";
+  while (!received.includes('"phase":"thinking"')) {
+    const part = await reader.read();
+    expect(part.done).toBe(false);
+    received += decoder.decode(part.value);
+  }
+  expect(received).toContain('"phase":"starting"');
+  expect(received).not.toContain('"content":"');
+  expect(received).not.toContain("private fixture reasoning");
+  await Bun.write(join(temporaryDirectory!, "codex-home", marker + ".release"), "release");
+  while (true) {
+    const part = await reader.read();
+    if (part.done) break;
+    received += decoder.decode(part.value);
+  }
+  expect(received).toContain('"phase":"answering"');
+  expect(received).toContain('"finish_reason":"stop"');
+  expect(received).not.toContain("private fixture reasoning");
+});
+
+test("aborting a streamed HTTP request kills its actual CLI process", async () => {
+  const marker = `cancel-${Date.now()}`;
+  const pidPath = join(temporaryDirectory!, "codex-home", marker + ".pid");
+  const aborter = new AbortController();
+  const response = await fetch(baseUrl + "/v1/chat/completions", {
+    method: "POST", headers, signal: aborter.signal,
+    body: JSON.stringify({ stream: true, messages: [{ role: "user", content: `__DUMMY_HANG__ ${marker}` }] }),
+  });
+  const reader = response.body!.getReader();
+  await reader.read();
+  const deadline = Date.now() + 3000;
+  while (!(await Bun.file(pidPath).exists()) && Date.now() < deadline) await Bun.sleep(20);
+  const pid = Number(await Bun.file(pidPath).text());
+  expect(pid).toBeGreaterThan(0);
+  aborter.abort();
+  await reader.cancel().catch(() => {});
+  let alive = true;
+  const killDeadline = Date.now() + 3000;
+  while (alive && Date.now() < killDeadline) {
+    try { process.kill(pid, 0); await Bun.sleep(20); }
+    catch { alive = false; }
+  }
+  expect(alive).toBe(false);
+});

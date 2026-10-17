@@ -112,7 +112,7 @@ export function preparePrompt(messages: Message[]): {
 export function createCodexRunner(config: ProxyConfig): CodexRunner {
   const command = resolveCodexCommand(config.codexCommand);
 
-  return async ({ prompt, images, model, reasoningEffort, developerInstructions, outputSchema, jsonObject, signal }, onOutput) => {
+  return async ({ prompt, images, model, reasoningEffort, developerInstructions, outputSchema, jsonObject, signal }, onOutput, onProgress) => {
     signal?.throwIfAborted();
     let schemaDirectory: string | undefined;
     const args = [
@@ -187,6 +187,9 @@ export function createCodexRunner(config: ProxyConfig): CodexRunner {
         };
         if (event.type === "error" || event.type === "turn.failed") eventError = event.error?.message ?? event.message ?? "Codex turn failed.";
         if (event.type === "thread.started" && event.thread_id) threadId = event.thread_id;
+        // Emit only coarse execution metadata, never the CLI's reasoning text.
+        if (event.type === "turn.started" || (event.type?.startsWith("item.") && event.item?.type === "reasoning")) onProgress?.("thinking");
+        if (event.type?.startsWith("item.") && event.item?.type === "agent_message") onProgress?.("answering");
         if (event.type === "item.completed" && event.item?.type === "agent_message" && event.item.text) {
           finalMessage = event.item.text;
         }

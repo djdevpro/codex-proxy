@@ -15,7 +15,19 @@ if (args[0] !== "exec") {
 }
 
 const prompt = args.at(-1) === "-" ? await Bun.stdin.text() : args.at(-1) ?? "";
-if (prompt.includes("__DUMMY_HANG__")) await Bun.sleep(60_000);
+if (prompt.includes("__DUMMY_HANG__")) {
+  const marker = /cancel-\d+/.exec(prompt)?.[0];
+  if (marker && process.env.CODEX_HOME) await Bun.write(join(process.env.CODEX_HOME, marker + ".pid"), String(process.pid));
+  process.stdout.write(JSON.stringify({ type: "turn.started" }) + "\n");
+  await Bun.sleep(60_000);
+}
+if (prompt.includes("__DUMMY_DELAY__")) {
+  process.stdout.write(JSON.stringify({ type: "turn.started" }) + "\n");
+  process.stdout.write(JSON.stringify({ type: "item.started", item: { type: "reasoning", text: "private fixture reasoning" } }) + "\n");
+  const marker = /progress-\d+/.exec(prompt)?.[0];
+  if (!marker || !process.env.CODEX_HOME) throw new Error("Missing progress fixture marker.");
+  while (!(await Bun.file(join(process.env.CODEX_HOME, marker + ".release")).exists())) await Bun.sleep(10);
+}
 if (prompt.includes("__DUMMY_FAILURE__")) {
   console.error("Deterministic dummy Codex failure.");
   process.exit(23);

@@ -208,6 +208,18 @@ console.log(value.greeting);
 
 See the [official non-interactive Codex documentation](https://developers.openai.com/codex/noninteractive/) for the distinction between JSONL events and final-answer schemas.
 
+### Live execution progress
+
+Set `stream: true` to receive an immediate connection event, followed by coarse execution updates from the CLI. OpenAI-compatible chunks include the optional `codex_progress` extension alongside an empty `delta`.
+
+~~~json
+{"object":"chat.completion.chunk","codex_progress":{"phase":"thinking"},"choices":[{"index":0,"delta":{},"finish_reason":null}]}
+~~~
+
+The phases are `starting` when the request begins, `thinking` when Codex starts a turn, and `answering` when an agent-message event arrives. These describe execution status. The proxy never forwards private reasoning text and does not fabricate topic summaries or token progress. SSE comments keep idle connections alive every 15 seconds. Clients may ignore the extension and keep reading normal completion chunks; Ollama NDJSON receives the same optional extension.
+
+Structured requests still emit status immediately, but their final content is withheld until execution succeeds and the result parses as JSON. Errors after HTTP headers arrive as an SSE `error` payload followed by `[DONE]`, without a successful `finish_reason`. Client cancellation closes the stream and kills its Codex process.
+
 ### System prompts and sliding instructions
 
 Only the first message is promoted to Codex `developer_instructions`, and only when its role is `developer` or legacy `system`. Later instruction messages stay in their original conversational position:
@@ -314,7 +326,7 @@ You can also run the Release workflow manually for an existing tag. Standalone b
 - Each request starts an ephemeral `codex exec`; conversation state belongs to the client. Personal Codex config and project instructions are not loaded. Shell, browser, computer-use and app tools are disabled; the sandbox remains read-only by default.
 - Browser requests are limited to loopback HTTP(S) origins unless explicitly allowlisted. Host checks reject DNS rebinding on loopback.
 - Chat prompts use stdin to support long conversations on Windows. Cancelling a request stops its CLI process.
-- SSE/NDJSON wrap completed CLI output; the CLI runner currently emits the final answer as one chunk, not token-by-token.
+- SSE/NDJSON send execution progress immediately. The final CLI answer arrives as one chunk after completion and JSON validation, rather than token-by-token.
 - Usage tokens are currently reported as zero because the proxy does not yet map Codex CLI usage events.
 - Model availability depends on the authenticated Codex account.
 

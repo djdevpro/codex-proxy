@@ -42,4 +42,6 @@ export interface CodexResult {
 }
 
 export type OutputHandler = (chunk: string) => void;
-export type CodexRunner = (input: CodexInput, onOutput?: OutputHandler) => Promise<string | CodexResult>;
+export type CodexProgressPhase = "starting" | "thinking" | "answering";
+export type ProgressHandler = (phase: CodexProgressPhase) => void;
+export type CodexRunner = (input: CodexInput, onOutput?: OutputHandler, onProgress?: ProgressHandler) => Promise<string | CodexResult>;

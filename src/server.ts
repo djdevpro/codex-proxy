@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { streamingResponse, type Endpoint } from "./streaming";
 import { ArtifactStore, type PublicArtifact } from "./artifacts";
 import { preparePrompt } from "./codex";
 import type { ProxyConfig } from "./config";
@@ -9,7 +10,6 @@ import type { CodexInput, CodexResult, CodexRunner, CompletionRequest, Message }
 import { structuredOutput, validateJsonOutput } from "./structured-output";
 import { VERSION } from "./version";
 
-type Endpoint = "openai" | "ollama-chat" | "ollama-generate";
 export interface ServerOptions { config: ProxyConfig; runner: CodexRunner }
 
 function selectModel(value: unknown, fallback: CodexModel): CodexModel | null {
@@ -49,68 +49,6 @@ function contentWithArtifacts(content: string, artifacts: PublicArtifact[]): str
   const markdown = artifactMarkdown(artifacts);
   if (!markdown) return content;
   return content ? `${content}\n\n${markdown}` : markdown;
-}
-
-function streamingResponse(endpoint: Endpoint, input: CodexInput, runner: CodexRunner, artifacts: ArtifactStore, requestUrl: string): Response {
-  const encoder = new TextEncoder();
-  const id = `chatcmpl-${randomUUID()}`;
-  const created = Math.floor(Date.now() / 1000);
-  const openAi = endpoint === "openai";
-
-  const body = new ReadableStream({
-    async start(controller) {
-      let emitted = false;
-      const send = (chunk: string) => {
-        if (!chunk) return;
-        emitted = true;
-        const payload =
-          endpoint === "openai"
-            ? { id, object: "chat.completion.chunk", created, model: input.model, choices: [{ index: 0, delta: { content: chunk }, finish_reason: null }] }
-            : endpoint === "ollama-chat"
-              ? { model: input.model, message: { role: "assistant", content: chunk }, done: false }
-              : { model: input.model, response: chunk, done: false };
-        controller.enqueue(encoder.encode(openAi ? `data: ${JSON.stringify(payload)}\n\n` : `${JSON.stringify(payload)}\n`));
-      };
-
-      try {
-        const result = normalizeResult(await runner(input, input.outputSchema || input.jsonObject ? undefined : send));
-        validateJsonOutput(result.content, input);
-        if (!emitted) send(result.content);
-        const published = artifacts.publish(requestUrl, result.artifacts);
-        if (published.length > 0 && !input.outputSchema && !input.jsonObject) send(`\n\n${artifactMarkdown(published)}`);
-        if (openAi) {
-          const completed = {
-            id,
-            object: "chat.completion.chunk",
-            created,
-            model: input.model,
-            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-            ...(published.length > 0 ? { artifacts: published } : {}),
-          };
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(completed)}\n\ndata: [DONE]\n\n`));
-        } else {
-          controller.enqueue(
-            encoder.encode(
-              `${JSON.stringify({ model: input.model, done: true, done_reason: "stop", ...(published.length > 0 ? { artifacts: published } : {}) })}\n`,
-            ),
-          );
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        controller.enqueue(encoder.encode(openAi ? `data: ${JSON.stringify({ error: { message, type: "server_error" } })}\n\ndata: [DONE]\n\n` : `${JSON.stringify({ error: message })}\n`));
-      } finally {
-        controller.close();
-      }
-    },
-  });
-
-  return new Response(body, {
-    headers: {
-      ...CORS_HEADERS,
-      "cache-control": "no-cache",
-      "content-type": openAi ? "text/event-stream" : "application/x-ndjson",
-    },
-  });
 }
 
 async function completion(request: Request, endpoint: Endpoint, config: ProxyConfig, runner: CodexRunner, artifacts: ArtifactStore): Promise<Response> {

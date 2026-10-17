@@ -221,7 +221,7 @@ describe("structured output and malformed requests", () => {
     const stream = await response.text();
     expect(stream).toContain("[DONE]");
     expect(stream).not.toContain("invalid intermediate");
-    const firstEvent = JSON.parse(stream.split("\n\n")[0]!.slice(6));
+    const firstEvent = stream.split("\n\n").filter((event) => event.startsWith("data: {")).map((event) => JSON.parse(event.slice(6))).find((event) => event.choices?.[0]?.delta?.content);
     expect(JSON.parse(firstEvent.choices[0].delta.content)).toEqual({ ok: true });
   });
   test("rejects malformed bodies, message parts and formats without running Codex", async () => {
