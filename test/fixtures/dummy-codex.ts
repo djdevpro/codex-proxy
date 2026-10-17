@@ -14,14 +14,15 @@ if (args[0] !== "exec") {
   process.exit(2);
 }
 
-const prompt = args.at(-1) ?? "";
+const prompt = args.at(-1) === "-" ? await Bun.stdin.text() : args.at(-1) ?? "";
+if (prompt.includes("__DUMMY_HANG__")) await Bun.sleep(60_000);
 if (prompt.includes("__DUMMY_FAILURE__")) {
   console.error("Deterministic dummy Codex failure.");
   process.exit(23);
 }
 
 const threadId = randomUUID();
-const developerConfig = optionValue("--config") ?? "";
+const developerConfig = args.find((arg) => arg.startsWith("developer_instructions=")) ?? "";
 const requestedCount = Number(/__CODEX_PROXY_IMAGE_COUNT_(\d+)__/.exec(developerConfig)?.[1] ?? 0);
 const imageCount = requestedCount || (prompt.includes("__DUMMY_IMAGE__") ? 1 : 0);
 if (imageCount > 0) {
@@ -58,6 +59,8 @@ const invocation = {
   skipGitRepoCheck: args.includes("--skip-git-repo-check"),
   json: args.includes("--json"),
   developerConfig,
+  ...(args.some((arg) => arg.startsWith("model_reasoning_effort=")) ? { reasoningEffort: JSON.parse(args.find((arg) => arg.startsWith("model_reasoning_effort="))!.split("=")[1]!) } : {}),
+  ...(optionValue("--output-schema") ? { outputSchema: await Bun.file(optionValue("--output-schema")!).json() } : {}),
 };
 
 const output = `${[

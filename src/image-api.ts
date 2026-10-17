@@ -62,6 +62,7 @@ export async function handleImageGeneration(
     return failure("Request body must be valid JSON.", 400);
   }
 
+  if (!body || typeof body !== "object" || Array.isArray(body)) return failure("Request body must be an object.", 400);
   if (typeof body.prompt !== "string" || !body.prompt.trim()) return failure("prompt must be a non-empty string.", 400);
   if (body.prompt.length > 32_000) return failure("prompt must contain at most 32000 characters.", 400);
 

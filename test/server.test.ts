@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { ProxyConfig } from "../src/config";
-import { CodexModel } from "../src/models";
+import { CODEX_MODELS, CodexModel } from "../src/models";
 import { createServer } from "../src/server";
 import type { CodexRunner } from "../src/types";
 
@@ -8,7 +8,7 @@ const config: ProxyConfig = {
   host: "127.0.0.1",
   port: 0,
   token: "test-token",
-  defaultModel: CodexModel.Gpt56Terra,
+  defaultModel: CodexModel.Gpt61Sol,
   sandbox: "read-only",
   timeoutMs: 1_000,
 };
@@ -31,8 +31,8 @@ describe("metadata", () => {
     const ollama = await fetch(`${base}/api/tags`).then((response) => response.json());
 
     expect(health.ok).toBe(true);
-    expect(openAi.data.map((item: { id: string }) => item.id)).toEqual(Object.values(CodexModel));
-    expect(ollama.models.map((item: { name: string }) => item.name)).toEqual(Object.values(CodexModel));
+    expect(openAi.data.map((item: { id: string }) => item.id)).toEqual(CODEX_MODELS);
+    expect(ollama.models.map((item: { name: string }) => item.name)).toEqual(CODEX_MODELS);
   });
 });
 
@@ -55,7 +55,7 @@ describe("completions", () => {
     const openAi = await fetch(`${base}/v1/chat/completions`, {
       method: "POST",
       headers: authHeaders,
-      body: JSON.stringify({ model: CodexModel.Gpt56Sol, messages: [{ role: "user", content: "hello" }] }),
+      body: JSON.stringify({ model: CodexModel.Gpt6Astra, messages: [{ role: "user", content: "hello" }] }),
     }).then((response) => response.json());
     const ollama = await fetch(`${base}/api/generate`, {
       method: "POST",
@@ -63,8 +63,8 @@ describe("completions", () => {
       body: JSON.stringify({ prompt: "hello" }),
     }).then((response) => response.json());
 
-    expect(openAi.choices[0].message.content).toBe("gpt-5.6-sol|user: hello");
-    expect(ollama.response).toBe("gpt-5.6-terra|user: hello");
+    expect(openAi.choices[0].message.content).toBe("gpt-6-astra|user: hello");
+    expect(ollama.response).toBe("gpt-6.1-sol|user: hello");
   });
 
   test("streams SSE and NDJSON", async () => {
@@ -171,4 +171,83 @@ describe("image generation", () => {
     expect(developerInstructions).toContain("Quality target: high");
     expect(developerInstructions).toContain("fully opaque background");
   });
+});
+
+
+describe("local browser access", () => {
+  test("allows Rilby on localhost and rejects unrelated sites before execution", async () => {
+    let calls = 0;
+    const base = start(async () => { calls++; return "OK"; });
+    const allowed = await fetch(base + "/health", { headers: { origin: "http://localhost:3100" } });
+    expect(allowed.headers.get("access-control-allow-origin")).toBe("http://localhost:3100");
+    const blocked = await fetch(base + "/v1/chat/completions", {
+      method: "POST", headers: { ...authHeaders, origin: "https://untrusted.example" },
+      body: JSON.stringify({ messages: [{ role: "user", content: "hello" }] }),
+    });
+    expect(blocked.status).toBe(403);
+    expect(blocked.headers.has("access-control-allow-origin")).toBe(false);
+    expect(calls).toBe(0);
+    const rebinding = await fetch(base + "/health", { headers: { host: "untrusted.example" } });
+    expect(rebinding.status).toBe(403);
+  });
+});
+
+describe("structured output and malformed requests", () => {
+  const messages = [{ role: "user", content: "Return a result." }];
+  test("passes JSON Schema to Codex and preserves the JSON content", async () => {
+    let received: Parameters<CodexRunner>[0] | undefined;
+    const base = start(async (input) => { received = input; return '{"ok":true}'; });
+    const schema = { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"], additionalProperties: false };
+    const response = await fetch(base + "/v1/chat/completions", { method: "POST", headers: authHeaders,
+      body: JSON.stringify({ messages, response_format: { type: "json_schema", json_schema: { name: "result", schema, strict: true } } }),
+    });
+    expect(response.status).toBe(200);
+    expect(received?.outputSchema).toEqual(schema);
+    expect((await response.json()).choices[0].message.content).toBe('{"ok":true}');
+  });
+  test("rejects invalid JSON from Codex instead of pretending success", async () => {
+    const base = start(async () => "Not JSON");
+    const response = await fetch(base + "/v1/chat/completions", { method: "POST", headers: authHeaders,
+      body: JSON.stringify({ messages, response_format: { type: "json_object" } }),
+    });
+    expect(response.status).toBe(502);
+    expect((await response.json()).error.message).toContain("valid JSON");
+  });
+  test("validates structured output before emitting streamed content", async () => {
+    const base = start(async (_input, output) => { output?.("invalid intermediate"); return '{"ok":true}'; });
+    const response = await fetch(base + "/v1/chat/completions", { method: "POST", headers: authHeaders,
+      body: JSON.stringify({ messages, stream: true, response_format: { type: "json_object" } }),
+    });
+    const stream = await response.text();
+    expect(stream).toContain("[DONE]");
+    expect(stream).not.toContain("invalid intermediate");
+    const firstEvent = JSON.parse(stream.split("\n\n")[0]!.slice(6));
+    expect(JSON.parse(firstEvent.choices[0].delta.content)).toEqual({ ok: true });
+  });
+  test("rejects malformed bodies, message parts and formats without running Codex", async () => {
+    let calls = 0;
+    const base = start(async () => { calls++; return "OK"; });
+    for (const body of [null, [], { messages: [null] }, { messages: [{ role: "user", content: [null] }] },
+      { messages, stream: "yes" }, { messages, response_format: { type: "unknown" } },
+      { messages, response_format: { type: "json_schema", json_schema: { name: "result", schema: null } } }]) {
+      const response = await fetch(base + "/v1/chat/completions", { method: "POST", headers: authHeaders, body: JSON.stringify(body) });
+      expect(response.status).toBe(400);
+    }
+    expect(calls).toBe(0);
+  });
+});
+
+test("accepts explicit reasoning and rejects invalid effort before invoking Codex", async () => {
+  let calls = 0;
+  let effort: unknown;
+  const base = start(async (input) => { calls++; effort = input.reasoningEffort; return "OK"; });
+  const body = { model: CodexModel.Gpt61Sol, messages: [{ role: "user", content: "hello" }] };
+  const accepted = await fetch(base + "/v1/chat/completions", { method: "POST", headers: authHeaders, body: JSON.stringify({ ...body, reasoning_effort: "max" }) });
+  expect(accepted.status).toBe(200);
+  expect(effort).toBe("max");
+  for (const reasoning_effort of ["unlimited", 4, null]) {
+    const rejected = await fetch(base + "/v1/chat/completions", { method: "POST", headers: authHeaders, body: JSON.stringify({ ...body, reasoning_effort }) });
+    expect(rejected.status).toBe(400);
+  }
+  expect(calls).toBe(1);
 });

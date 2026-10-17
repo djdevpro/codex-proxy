@@ -1,4 +1,4 @@
-import type { CodexModel } from "./models";
+import type { CodexModel, ReasoningEffort } from "./models";
 
 export type ContentPart =
   | { type: "text"; text: string }
@@ -14,13 +14,19 @@ export interface CompletionRequest {
   stream?: boolean;
   messages?: Message[];
   prompt?: string;
+  response_format?: unknown;
+  reasoning_effort?: unknown;
 }
 
 export interface CodexInput {
   prompt: string;
   images: string[];
   model: CodexModel;
+  reasoningEffort?: ReasoningEffort;
   developerInstructions?: string;
+  outputSchema?: Record<string, unknown>;
+  jsonObject?: boolean;
+  signal?: AbortSignal;
 }
 
 export interface GeneratedArtifact {

@@ -12,7 +12,9 @@ Environment:
   CODEX_PROXY_HOST        Bind address (default: 127.0.0.1)
   CODEX_PROXY_PORT        Listen port (default: 8787)
   CODEX_PROXY_TOKEN       Optional Bearer token for non-local exposure
-  CODEX_PROXY_MODEL       Default model (default: gpt-5.6-terra)
+  CODEX_PROXY_MODEL       Default model (default: gpt-6.1-sol)
+  CODEX_PROXY_MODELS      Extra available model IDs (comma-separated)
+  CODEX_PROXY_ALLOWED_ORIGINS  Extra trusted browser origins (comma-separated)
   CODEX_PROXY_COMMAND     Path to the Codex executable
   CODEX_PROXY_SANDBOX     read-only | workspace-write | danger-full-access
   CODEX_PROXY_TIMEOUT_MS  Request timeout in milliseconds

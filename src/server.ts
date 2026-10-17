@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 import { ArtifactStore, type PublicArtifact } from "./artifacts";
 import { preparePrompt } from "./codex";
 import type { ProxyConfig } from "./config";
-import { CORS_HEADERS, failure, isAuthorized, json } from "./http";
+import { CORS_HEADERS, failure, isAuthorized, json, trustedRequest, withCors } from "./http";
 import { handleImageGeneration } from "./image-api";
-import { CODEX_MODELS, isCodexModel, type CodexModel } from "./models";
+import { CODEX_MODELS, isCodexModel, modelMetadata, selectReasoningEffort, type CodexModel } from "./models";
 import type { CodexInput, CodexResult, CodexRunner, CompletionRequest, Message } from "./types";
+import { structuredOutput, validateJsonOutput } from "./structured-output";
 import { VERSION } from "./version";
 
 type Endpoint = "openai" | "ollama-chat" | "ollama-generate";
@@ -22,7 +23,7 @@ function requestMessages(body: CompletionRequest): Message[] {
 }
 
 function modelObject(id: CodexModel) {
-  return { id, object: "model", created: 0, owned_by: "codex" };
+  return { ...modelMetadata(id), id, object: "model", created: 0, owned_by: "codex" };
 }
 
 function ollamaModel(name: CodexModel) {
@@ -72,10 +73,11 @@ function streamingResponse(endpoint: Endpoint, input: CodexInput, runner: CodexR
       };
 
       try {
-        const result = normalizeResult(await runner(input, send));
+        const result = normalizeResult(await runner(input, input.outputSchema || input.jsonObject ? undefined : send));
+        validateJsonOutput(result.content, input);
         if (!emitted) send(result.content);
         const published = artifacts.publish(requestUrl, result.artifacts);
-        if (published.length > 0) send(`\n\n${artifactMarkdown(published)}`);
+        if (published.length > 0 && !input.outputSchema && !input.jsonObject) send(`\n\n${artifactMarkdown(published)}`);
         if (openAi) {
           const completed = {
             id,
@@ -121,8 +123,14 @@ async function completion(request: Request, endpoint: Endpoint, config: ProxyCon
     return failure("Request body must be valid JSON.", 400);
   }
 
+  if (!body || typeof body !== "object" || Array.isArray(body)) return failure("Request body must be an object.", 400);
+  if (body.stream !== undefined && typeof body.stream !== "boolean") return failure("stream must be a boolean.", 400);
   const model = selectModel(body.model, config.defaultModel);
   if (!model) return failure(`Unsupported model. Use one of: ${CODEX_MODELS.join(", ")}.`, 400);
+
+  let reasoningEffort: CodexInput["reasoningEffort"];
+  try { reasoningEffort = selectReasoningEffort(body.reasoning_effort, modelMetadata(model)); }
+  catch (error) { return failure(error instanceof Error ? error.message : String(error), 400); }
 
   const messages = requestMessages(body);
   if (messages.length === 0) return failure(endpoint === "ollama-generate" ? "prompt must be a non-empty string." : "messages must be a non-empty array.", 400);
@@ -133,13 +141,17 @@ async function completion(request: Request, endpoint: Endpoint, config: ProxyCon
   } catch (error) {
     return failure(error instanceof Error ? error.message : String(error), 400);
   }
-  const input = { ...prepared, model };
+  let format: ReturnType<typeof structuredOutput>;
+  try { format = structuredOutput(body.response_format); }
+  catch (error) { return failure(error instanceof Error ? error.message : String(error), 400); }
+  const input: CodexInput = { ...prepared, ...format, model, reasoningEffort, signal: request.signal };
   if (body.stream === true) return streamingResponse(endpoint, input, runner, artifacts, request.url);
 
   try {
     const result = normalizeResult(await runner(input));
+    validateJsonOutput(result.content, input);
     const published = artifacts.publish(request.url, result.artifacts);
-    const content = contentWithArtifacts(result.content, published);
+    const content = input.outputSchema || input.jsonObject ? result.content : contentWithArtifacts(result.content, published);
     const extension = published.length > 0 ? { artifacts: published } : {};
     if (endpoint === "ollama-chat") return json({ model, message: { role: "assistant", content }, done: true, done_reason: "stop", ...extension });
     if (endpoint === "ollama-generate") return json({ model, response: content, done: true, done_reason: "stop", ...extension });
@@ -162,11 +174,19 @@ export function createServer({ config, runner }: ServerOptions) {
   return Bun.serve({
     hostname: config.host,
     port: config.port,
+    idleTimeout: 0,
+    maxRequestBodySize: 2 * 1024 * 1024,
     async fetch(request) {
+      if (!trustedRequest(request, config)) return failure("This browser origin or Host is not allowed to access the local proxy.", 403, "permission_error");
+      return withCors(await route(request), request);
+    },
+  });
+
+  async function route(request: Request): Promise<Response> {
       const { pathname } = new URL(request.url);
       if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS_HEADERS });
       if (request.method === "GET" && pathname === "/health") return json({ ok: true, service: "codex-proxy", version: VERSION });
-      if (request.method === "GET" && pathname === "/v1/models") return json({ object: "list", data: CODEX_MODELS.map(modelObject) });
+      if (request.method === "GET" && pathname === "/v1/models") return json({ object: "list", default_model: config.defaultModel, data: CODEX_MODELS.map(modelObject) });
       if (request.method === "GET" && pathname.startsWith("/v1/models/")) {
         const model = decodeURIComponent(pathname.slice("/v1/models/".length));
         return isCodexModel(model) ? json(modelObject(model)) : failure("Model not found.", 404, "not_found_error");
@@ -183,6 +203,5 @@ export function createServer({ config, runner }: ServerOptions) {
       if (request.method === "POST" && pathname === "/api/chat") return completion(request, "ollama-chat", config, runner, artifacts);
       if (request.method === "POST" && pathname === "/api/generate") return completion(request, "ollama-generate", config, runner, artifacts);
       return failure("Not found.", 404, "not_found_error");
-    },
-  });
+  }
 }

@@ -71,7 +71,9 @@ bun install
 bun run start
 ```
 
-The service is ready at `http://127.0.0.1:8787`. You can alternatively run a standalone binary from [GitHub Releases](https://github.com/djdevpro/codex-proxy/releases). Codex is discovered from `PATH`, `CODEX_INSTALL_DIR`, official install locations, and Codex Desktop on Windows.
+The service is ready at `http://127.0.0.1:8787`. You can alternatively run a standalone binary from [GitHub Releases](https://github.com/djdevpro/codex-proxy/releases). Codex is discovered from `PATH`, `CODEX_INSTALL_DIR`, official install locations, and versioned Codex Desktop installations on Windows.
+
+If the desktop app works but PowerShell says `codex` is not recognized, run `powershell -NoProfile -File scripts/install-cli-launcher.ps1`. This installs a small launcher in `~/.local/bin` and reuses the desktop CLI and existing login. Undo it with the same script plus `-Uninstall`. Open a new terminal after changing PATH.
 
 ### 3. Connect a client
 
@@ -90,7 +92,7 @@ const client = new OpenAI({
 });
 
 const result = await client.chat.completions.create({
-  model: "gpt-5.6-terra",
+  model: "gpt-6.1-sol",
   messages: [{ role: "user", content: "Say hello in French." }],
 });
 
@@ -102,14 +104,14 @@ Ollama-compatible chat:
 ```sh
 curl http://127.0.0.1:8787/api/chat \
   -H "Content-Type: application/json" \
-  -d '{"model":"gpt-5.6-terra","messages":[{"role":"user","content":"Say hello in French."}],"stream":false}'
+  -d '{"model":"gpt-6.1-sol","messages":[{"role":"user","content":"Say hello in French."}],"stream":false}'
 ```
 
 | Client setting | Value |
 |---|---|
 | OpenAI base URL | `http://127.0.0.1:8787/v1` |
 | Ollama base URL | `http://127.0.0.1:8787` |
-| Default model | `gpt-5.6-terra` |
+| Default model | `gpt-6.1-sol` when present in the local catalog, then `gpt-6-astra`, then the first available entry |
 
 Docker clients cannot usually reach a host service bound to loopback. If you deliberately bind another interface, set `CODEX_PROXY_TOKEN` and never expose an authenticated Codex session directly to the internet.
 
@@ -127,6 +129,84 @@ Docker clients cannot usually reach a host service bound to loopback. If you del
 | `GET` | `/artifacts/:id/:filename` | Generated image download |
 
 Metadata helpers such as `/v1/models/:id`, `/api/ps`, `/api/version`, and `/api/show` are also available.
+
+### Models and reasoning effort
+
+The proxy prefers GPT-6.1 Sol (`gpt-6.1-sol`) when it appears in the local Codex catalog, then GPT-6 Astra (`gpt-6-astra`). It preserves other visible catalog entries and explicit `CODEX_PROXY_MODEL` or request `model` overrides. It does not copy the default from your personal Codex configuration.
+
+`GET /v1/models` includes `default_model` and, when supplied by the local cache, each model's `display_name`, `supported_reasoning_efforts`, and `default_reasoning_effort`. A cached model is not a guarantee of account access. When the cache is missing, the two current models are offered as fallbacks without invented reasoning metadata.
+
+Set `reasoning_effort` in a chat request to choose a level, including Max:
+
+```json
+{
+  "model": "gpt-6-astra",
+  "reasoning_effort": "max",
+  "messages": [{"role": "user", "content": "Explain this problem carefully."}]
+}
+```
+
+The proxy forwards it to `codex exec --config 'model_reasoning_effort="max"'`. Omitting the field preserves the model default reported by Codex. An invalid level or a level excluded by known model metadata returns HTTP 400 before running Codex. Levels are model-dependent; use the catalog to populate a selector instead of assuming all models support Ultra. You can combine `reasoning_effort` with `response_format`.
+
+### Structured JSON output
+
+Use an OpenAI-compatible JSON Schema request:
+
+```json
+{
+  "messages": [{"role":"user","content":"Return a French greeting."}],
+  "response_format": {
+    "type":"json_schema",
+    "json_schema": {
+      "name":"greeting",
+      "strict":true,
+      "schema": {
+        "type":"object",
+        "properties":{"greeting":{"type":"string"}},
+        "required":["greeting"],
+        "additionalProperties":false
+      }
+    }
+  }
+}
+```
+
+The proxy passes this schema to Codex `--output-schema` in a temporary file, removes the file after execution, and returns the JSON string in `choices[0].message.content`. The Codex structured-output service enforces supported schema constraints; unsupported schemas return an error. `response_format: {"type":"json_object"}` adds a JSON instruction and verifies that the result parses as an object, without enforcing a schema. `--json` alone is the CLI's JSONL event format, not a final-answer schema.
+
+You can use the same schema directly from PowerShell with the repaired CLI:
+
+~~~powershell
+codex exec --output-schema examples/greeting.schema.json --output-last-message result.json "Return a greeting in French."
+Get-Content -Raw result.json | ConvertFrom-Json
+~~~
+
+Add `--json` only if you also want the separate progress-event stream in JSONL. The final JSON remains in `result.json`.
+
+With an OpenAI SDK client configured as above:
+
+~~~ts
+const result = await client.chat.completions.create({
+  model: "gpt-6.1-sol",
+  messages: [{ role: "user", content: "Return a greeting in French." }],
+  response_format: {
+    type: "json_schema",
+    json_schema: {
+      name: "greeting",
+      strict: true,
+      schema: {
+        type: "object",
+        properties: { greeting: { type: "string" } },
+        required: ["greeting"],
+        additionalProperties: false,
+      },
+    },
+  },
+});
+const value = JSON.parse(result.choices[0]?.message.content ?? "{}");
+console.log(value.greeting);
+~~~
+
+See the [official non-interactive Codex documentation](https://developers.openai.com/codex/noninteractive/) for the distinction between JSONL events and final-answer schemas.
 
 ### System prompts and sliding instructions
 
@@ -154,7 +234,7 @@ Use a local `file://` URL in an OpenAI content part. The proxy forwards it to `c
 
 ```json
 {
-  "model": "gpt-5.6-terra",
+  "model": "gpt-6.1-sol",
   "messages": [{
     "role": "user",
     "content": [
@@ -196,7 +276,9 @@ All settings are optional on loopback.
 |---|---|---|
 | `CODEX_PROXY_HOST` | `127.0.0.1` | Listen address |
 | `CODEX_PROXY_PORT` | `8787` | Listen port |
-| `CODEX_PROXY_MODEL` | `gpt-5.6-terra` | Default model |
+| `CODEX_PROXY_MODEL` | preferred available model | Explicit default model; overrides the `CODEX_MODEL` alias |
+| `CODEX_PROXY_MODELS` | Codex cache + current-model fallbacks when the cache is absent | Extra model IDs, comma-separated |
+| `CODEX_PROXY_ALLOWED_ORIGINS` | loopback HTTP(S) origins | Extra trusted browser origins, comma-separated |
 | `CODEX_PROXY_COMMAND` | auto-detected | Codex executable |
 | `CODEX_PROXY_SANDBOX` | `read-only` | Codex sandbox mode |
 | `CODEX_PROXY_TIMEOUT_MS` | `600000` | Request timeout |
@@ -229,7 +311,10 @@ You can also run the Release workflow manually for an existing tag. Standalone b
 ## Boundaries
 
 - The Responses API and OpenAI function-call translation are not implemented.
-- Each request starts an ephemeral `codex exec`; conversation state belongs to the client.
+- Each request starts an ephemeral `codex exec`; conversation state belongs to the client. Personal Codex config and project instructions are not loaded. Shell, browser, computer-use and app tools are disabled; the sandbox remains read-only by default.
+- Browser requests are limited to loopback HTTP(S) origins unless explicitly allowlisted. Host checks reject DNS rebinding on loopback.
+- Chat prompts use stdin to support long conversations on Windows. Cancelling a request stops its CLI process.
+- SSE/NDJSON wrap completed CLI output; the CLI runner currently emits the final answer as one chunk, not token-by-token.
 - Usage tokens are currently reported as zero because the proxy does not yet map Codex CLI usage events.
 - Model availability depends on the authenticated Codex account.
 

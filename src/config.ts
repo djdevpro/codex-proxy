@@ -10,6 +10,7 @@ export interface ProxyConfig {
   codexCommand?: string;
   sandbox: SandboxMode;
   timeoutMs: number;
+  allowedOrigins?: string[];
 }
 
 const SANDBOX_MODES = new Set<SandboxMode>(["read-only", "workspace-write", "danger-full-access"]);
@@ -22,13 +23,14 @@ function positiveInteger(name: string, value: string | undefined, fallback: numb
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ProxyConfig {
-  const defaultModel = env.CODEX_PROXY_MODEL ?? DEFAULT_MODEL;
+  const defaultModel = env.CODEX_PROXY_MODEL ?? env.CODEX_MODEL ?? DEFAULT_MODEL;
   if (!isCodexModel(defaultModel)) throw new Error(`CODEX_PROXY_MODEL must be one of: ${CODEX_MODELS.join(", ")}.`);
 
   const sandbox = (env.CODEX_PROXY_SANDBOX ?? "read-only") as SandboxMode;
   if (!SANDBOX_MODES.has(sandbox)) throw new Error("CODEX_PROXY_SANDBOX must be read-only, workspace-write, or danger-full-access.");
 
   return {
+    allowedOrigins: env.CODEX_PROXY_ALLOWED_ORIGINS?.split(",").map((origin) => new URL(origin.trim()).origin),
     host: env.CODEX_PROXY_HOST ?? "127.0.0.1",
     port: positiveInteger("CODEX_PROXY_PORT", env.CODEX_PROXY_PORT, 8787),
     token: env.CODEX_PROXY_TOKEN || undefined,

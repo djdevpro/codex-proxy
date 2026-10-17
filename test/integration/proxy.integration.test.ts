@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createServer as createTcpServer } from "node:net";
@@ -22,6 +22,7 @@ interface DummyInvocation {
   skipGitRepoCheck: boolean;
   json: boolean;
   developerConfig: string;
+  reasoningEffort?: string;
 }
 
 interface StreamChunk {
@@ -110,6 +111,14 @@ beforeAll(
     });
     if (!build.success) throw new Error(`Unable to compile dummy Codex CLI:\n${build.logs.join("\n")}`);
 
+    const codexHome = join(temporaryDirectory, "codex-home");
+    await mkdir(codexHome);
+    await Bun.write(join(codexHome, "models_cache.json"), JSON.stringify({ models: [
+      { slug: "gpt-6.1-sol", visibility: "list", display_name: "GPT-6.1 Sol",
+        default_reasoning_level: "low", supported_reasoning_levels: [{ effort: "low" }, { effort: "max" }] },
+      { slug: "gpt-6-astra", visibility: "list", display_name: "GPT-6 Astra",
+        default_reasoning_level: "medium", supported_reasoning_levels: [{ effort: "medium" }, { effort: "max" }] },
+    ] }));
     const port = await reservePort();
     baseUrl = `http://127.0.0.1:${port}`;
     proxy = Bun.spawn([process.execPath, "run", "src/index.ts"], {
@@ -120,7 +129,7 @@ beforeAll(
         CODEX_PROXY_PORT: String(port),
         CODEX_PROXY_TOKEN: TOKEN,
         CODEX_PROXY_COMMAND: dummyCommand,
-        CODEX_PROXY_MODEL: "gpt-5.6-terra",
+        CODEX_PROXY_MODEL: "gpt-6.1-sol",
         CODEX_PROXY_SANDBOX: "read-only",
         CODEX_PROXY_TIMEOUT_MS: "5000",
         CODEX_HOME: join(temporaryDirectory, "codex-home"),
@@ -166,7 +175,7 @@ describe("proxy process with a dummy Codex CLI", () => {
       method: "POST",
       headers,
       body: JSON.stringify({
-        model: "gpt-5.6-sol",
+        model: "gpt-6-astra",
         messages: [
           { role: "system", content: "Be exact." },
           { role: "user", content: "first ping" },
@@ -183,7 +192,7 @@ describe("proxy process with a dummy Codex CLI", () => {
     expect(invocation).toEqual({
       provider: "dummy-codex",
       command: "exec",
-      model: "gpt-5.6-sol",
+      model: "gpt-6-astra",
       sandbox: "read-only",
       prompt:
         "user: first ping\n\nassistant: first pong\n\nsystem: From now on, answer as JSON.\n\nuser: integration ping",
@@ -192,6 +201,7 @@ describe("proxy process with a dummy Codex CLI", () => {
       skipGitRepoCheck: true,
       json: true,
       developerConfig: 'developer_instructions="system: Be exact."',
+      reasoningEffort: "medium",
     });
   });
 
@@ -215,7 +225,7 @@ describe("proxy process with a dummy Codex CLI", () => {
     const invocation = JSON.parse(content) as DummyInvocation;
 
     expect(invocation.provider).toBe("dummy-codex");
-    expect(invocation.model).toBe("gpt-5.6-terra");
+    expect(invocation.model).toBe("gpt-6.1-sol");
     expect(invocation.prompt).toBe("user: stream integration");
     expect(rows.at(-1)?.done).toBe(true);
   });
@@ -301,4 +311,39 @@ describe("proxy process with a dummy Codex CLI", () => {
     const body = (await response.json()) as { error: { message: string; type: string } };
     expect(body.error).toEqual({ message: "Deterministic dummy Codex failure.", type: "codex_error" });
   });
+});
+
+
+test("forwards JSON Schema through an ephemeral file and accepts long Windows prompts via stdin", async () => {
+  const schema = { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"], additionalProperties: false };
+  const prompt = "long prompt " + "x".repeat(50_000);
+  const response = await fetch(baseUrl + "/v1/chat/completions", {
+    method: "POST", headers,
+    body: JSON.stringify({ messages: [{ role: "user", content: prompt }], response_format: { type: "json_schema", json_schema: { name: "test", schema, strict: true } } }),
+  });
+  expect(response.status).toBe(200);
+  const body = await response.json() as { choices: Array<{ message: { content: string } }> };
+  const invocation = JSON.parse(body.choices[0]!.message.content);
+  expect(invocation.outputSchema).toEqual(schema);
+  expect(invocation.prompt).toBe("user: " + prompt);
+});
+
+test("publishes cached reasoning metadata and forwards Max to the CLI", async () => {
+  const catalog = await fetch(baseUrl + "/v1/models").then((response) => response.json());
+  expect(catalog.default_model).toBe("gpt-6.1-sol");
+  expect(catalog.data[0]).toMatchObject({
+    id: "gpt-6.1-sol", default_reasoning_effort: "low", supported_reasoning_efforts: ["low", "max"],
+  });
+  const response = await fetch(baseUrl + "/v1/chat/completions", {
+    method: "POST", headers,
+    body: JSON.stringify({ model: "gpt-6-astra", reasoning_effort: "max", messages: [{ role: "user", content: "max integration" }] }),
+  });
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(JSON.parse(body.choices[0].message.content).reasoningEffort).toBe("max");
+  const rejected = await fetch(baseUrl + "/v1/chat/completions", {
+    method: "POST", headers,
+    body: JSON.stringify({ model: "gpt-6-astra", reasoning_effort: "ultra", messages: [{ role: "user", content: "unsupported in fixture" }] }),
+  });
+  expect(rejected.status).toBe(400);
 });
