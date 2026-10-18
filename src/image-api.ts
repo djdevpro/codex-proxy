@@ -1,7 +1,7 @@
 import type { ArtifactStore } from "./artifacts";
 import type { ProxyConfig } from "./config";
 import { failure, isAuthorized, json } from "./http";
-import { defaultModel, type ModelCatalogProvider } from "./models";
+import { defaultModel, selectReasoningEffort, type ModelCatalogProvider } from "./models";
 import type { CodexResult, CodexRunner } from "./types";
 
 interface ImageGenerationRequest {
@@ -13,9 +13,12 @@ interface ImageGenerationRequest {
   prompt?: unknown;
   quality?: unknown;
   response_format?: unknown;
+  reasoning_effort?: unknown;
   size?: unknown;
   stream?: unknown;
 }
+
+const MAX_GENERATED_BYTES = 10 * 1024 * 1024;
 
 function optionalEnum<T extends string>(value: unknown, values: readonly T[]): T | undefined | null {
   if (value === undefined) return undefined;
@@ -90,6 +93,9 @@ export async function handleImageGeneration(
         ? body.model
         : null;
   if (!model) return failure(`model must be a GPT Image alias or one of: ${available.models.map((entry) => entry.id).join(", ")}.`, 400);
+  let reasoningEffort: ReturnType<typeof selectReasoningEffort>;
+  try { reasoningEffort = selectReasoningEffort(body.reasoning_effort, available.models.find((entry) => entry.id === model)!); }
+  catch (error) { return failure(error instanceof Error ? error.message : String(error), 400); }
 
   const responseFormat = optionalEnum(body.response_format, ["b64_json", "url"] as const);
   if (responseFormat === null) return failure("response_format must be b64_json or url.", 400);
@@ -133,9 +139,11 @@ export async function handleImageGeneration(
   ].join("\n");
 
   try {
+    request.signal.throwIfAborted();
     const result = normalizeResult(
-      await runner({ prompt: body.prompt.trim(), images: [], model, developerInstructions }),
+      await runner({ prompt: body.prompt.trim(), images: [], model, reasoningEffort, developerInstructions, signal: request.signal }),
     );
+    request.signal.throwIfAborted();
     if (result.artifacts.length < imageCount) {
       return failure(
         `Codex generated ${result.artifacts.length} image(s), but ${imageCount} were requested.${result.content ? ` ${result.content}` : ""}`,
@@ -145,13 +153,26 @@ export async function handleImageGeneration(
     }
 
     const generated = result.artifacts.slice(0, imageCount);
+    let totalBytes = 0;
+    for (const artifact of generated) {
+      totalBytes += Bun.file(artifact.path).size;
+      if (totalBytes > MAX_GENERATED_BYTES) throw new Error("Generated images exceed the 10 MiB combined size limit.");
+    }
+    const encoded: { b64_json: string }[] = [];
+    if (responseFormat !== "url") {
+      totalBytes = 0;
+      // Sequential reads keep the working set bounded even for multiple variants.
+      for (const artifact of generated) {
+        request.signal.throwIfAborted();
+        const bytes = await Bun.file(artifact.path).slice(0, MAX_GENERATED_BYTES - totalBytes + 1).arrayBuffer();
+        totalBytes += bytes.byteLength;
+        if (totalBytes > MAX_GENERATED_BYTES) throw new Error("Generated images exceed the 10 MiB combined size limit.");
+        encoded.push({ b64_json: Buffer.from(bytes).toString("base64") });
+      }
+    }
+    request.signal.throwIfAborted();
     const published = artifacts.publish(request.url, generated);
-    const data =
-      responseFormat === "url"
-        ? published.map((artifact) => ({ url: artifact.url }))
-        : await Promise.all(
-            generated.map(async (artifact) => ({ b64_json: Buffer.from(await Bun.file(artifact.path).arrayBuffer()).toString("base64") })),
-          );
+    const data = responseFormat === "url" ? published.map((artifact) => ({ url: artifact.url })) : encoded;
     return json({ created: Math.floor(Date.now() / 1000), data, x_codex_artifacts: published });
   } catch (error) {
     return failure(error instanceof Error ? error.message : String(error), 502, "image_generation_error");

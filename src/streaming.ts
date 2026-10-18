@@ -3,6 +3,7 @@ import type { ArtifactStore } from "./artifacts";
 import { CORS_HEADERS } from "./http";
 import { validateJsonOutput } from "./structured-output";
 import type { CodexInput, CodexProgressPhase, CodexRunner } from "./types";
+import { normalizeSources } from "./web-search";
 
 export type Endpoint = "openai" | "ollama-chat" | "ollama-generate";
 
@@ -86,7 +87,8 @@ export function streamingResponse(endpoint: Endpoint, input: CodexInput, runner:
       if (published.length > 0 && !input.outputSchema && !input.jsonObject) {
         send("\n\n" + published.map((artifact) => `![${artifact.filename}](${artifact.url})`).join("\n"));
       }
-      const extension = published.length > 0 ? { artifacts: published } : {};
+      const sources = input.webSearch ? normalizeSources(normalized.sources) : [];
+      const extension = { ...(published.length ? { artifacts: published } : {}), ...(sources.length ? { sources } : {}) };
       sendEvent(openAi ? {
         ...chunk({}), choices: [{ index: 0, delta: {}, finish_reason: "stop" }], ...extension,
       } : { model: input.model, done: true, done_reason: "stop", ...extension });

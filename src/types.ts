@@ -17,6 +17,7 @@ export interface CompletionRequest {
   prompt?: string;
   response_format?: unknown;
   reasoning_effort?: unknown;
+  tools?: unknown;
 }
 
 export interface CodexInput {
@@ -28,6 +29,7 @@ export interface CodexInput {
   outputSchema?: Record<string, unknown>;
   jsonObject?: boolean;
   signal?: AbortSignal;
+  webSearch?: boolean;
 }
 
 export interface GeneratedArtifact {
@@ -40,7 +42,10 @@ export interface GeneratedArtifact {
 export interface CodexResult {
   content: string;
   artifacts: GeneratedArtifact[];
+  sources?: WebSource[];
 }
+
+export interface WebSource { url: string; title: string }
 
 export type OutputHandler = (chunk: string) => void;
 export type CodexProgressPhase = "starting" | "thinking" | "answering";

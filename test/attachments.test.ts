@@ -23,8 +23,8 @@ describe("browser attachments", () => {
   });
   test("bounds count and decoded total size", () => {
     const parser = attachmentParser();
-    for (let i=0;i<8;i++) parser.image(png);
-    expect(() => parser.image(png)).toThrow("8 attachments");
+    for (let i=0;i<32;i++) parser.image(png);
+    expect(() => parser.image(png)).toThrow("32 attachments");
     const large = file("a".repeat(6 * 1024 * 1024));
     const total = attachmentParser();
     total.textFile(large);

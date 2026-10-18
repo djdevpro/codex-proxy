@@ -113,7 +113,7 @@ export function createCodexRunner(config: ProxyConfig): CodexRunner {
   const command = resolveCodexCommand(config.codexCommand);
 
   const run: CodexRunner = async (input, onOutput, onProgress, onSummary, onCommentary) => {
-    if (onProgress || onSummary || onCommentary) return runAppServer(command, config, input, onOutput, onProgress, onSummary, onCommentary);
+    if (input.webSearch || onProgress || onSummary || onCommentary) return runAppServer(command, config, input, onOutput, onProgress, onSummary, onCommentary);
     const { prompt, images, model, reasoningEffort, developerInstructions, outputSchema, jsonObject, signal } = input;
     signal?.throwIfAborted();
     let schemaDirectory: string | undefined;

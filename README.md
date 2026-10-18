@@ -224,9 +224,17 @@ The optional `codex_progress.phase` extension remains available for connection s
 
 Structured requests stream commentary and available summaries immediately, while final JSON content is withheld until execution and validation succeed. Errors after HTTP headers arrive as an SSE `error` payload followed by `[DONE]`, without a successful `finish_reason`. Client cancellation interrupts and kills that request's app-server process.
 
-The app-server adapter creates an ephemeral thread in a new empty temporary working directory. Shell, browser, computer-use, apps, plugins, hooks, memory, host skills, image generation, and delegated agents are disabled; configured MCP servers are explicitly disabled before the thread starts. No approval request is granted. It reuses existing Codex authentication without copying credentials or changing personal settings. Non-streaming requests and image generation continue to use the isolated `codex exec` adapter.
+The app-server adapter creates an ephemeral thread in a new empty temporary working directory. Shell, browser, computer-use, apps, plugins, hooks, memory, host skills, image generation, and delegated agents are disabled; configured MCP servers are explicitly disabled before the thread starts. No approval request is granted. It reuses existing Codex authentication without copying credentials or changing personal settings. Non-streaming requests without web search and image generation continue to use the isolated `codex exec` adapter.
 
 This integration uses the installed CLI's app-server protocol. See the [official app-server documentation](https://learn.chatgpt.com/docs/app-server) for its experimental status and event definitions.
+
+### Public web research
+
+`GET /health` and `GET /v1/models` advertise `capabilities.web_search` and `capabilities.image_generation`. To enable public research for one chat request, send `"tools": [{"type":"web_search"}]` alongside `messages`. Omission or `[]` keeps web search disabled; unsupported tools and additional tool options return HTTP 400. Both streamed and non-streamed web requests use app-server with `web_search="live"`, so search, opening pages and finding text in pages can inform structured output too. Shell, local file access and MCP tools remain disabled.
+
+Current Codex exposes the web tool through `code_mode_host`, which the proxy enables only for opted-in web requests. The other tool exclusions remain in place. Enabling `web_search="live"` alone leaves the model without a usable web tool on this runtime; the adapter is verified with real searches and page opens as well as deterministic transport tests.
+
+Successful responses can include `sources: [{"url":"https://example.com/","title":"Example"}]` at the response root, or on the final SSE chunk with `finish_reason: "stop"`. Sources come only from completed web tool metadata, never from URLs written by the model. The proxy keeps up to 40 unique HTTP(S) URLs without credentials, with titles limited to 500 characters and URLs to 4000 characters. If the installed Codex tool supplies no public URLs, the optional sources field is absent.
 
 ### System prompts and sliding instructions
 
@@ -254,7 +262,7 @@ Browser clients can send images as `image_url` content parts with a base64 data 
 
 UTF-8 text documents use `{ "type": "file", "file": { "filename": "document.txt", "file_data": "data:text/plain;base64,..." } }`. Their decoded text is included as reference material in the conversation. PDF and Office files must first be extracted to text by the client; the local Codex input protocol has no generic binary document part. Audio and arbitrary binary files are not accepted by this bridge.
 
-Only user messages may carry attachments. A request may contain up to 8 attachments and 10 MiB of decoded attachment data in total, with the same 10 MiB limit per file. The HTTP JSON body limit is 16 MiB to allow base64 overhead and conversation text. Remote image URLs are not downloaded.
+Only user messages may carry attachments. A request may contain up to 32 attachments and 10 MiB of decoded attachment data in total, with the same 10 MiB limit per file. The HTTP JSON body limit is 16 MiB to allow base64 overhead and conversation text. Remote image URLs are not downloaded.
 
 Use a local `file://` URL in an OpenAI content part. The proxy forwards it to `codex exec --image`:
 
@@ -291,6 +299,7 @@ curl http://127.0.0.1:8787/v1/images/generations \
 - Every result is also described in the `x_codex_artifacts` extension and saved by Codex under `~/.codex/generated_images/`.
 - `gpt-image-*` is a compatibility alias: the authenticated Codex agent invokes its `imagegen` skill. `size` and `quality` are developer-instruction targets, so they are best effort.
 - PNG is supported. Native transparency and partial-image streaming are not.
+- A concrete Codex `model` and its supported `reasoning_effort` can be selected, using the same catalog and validation as chat. Client cancellation stops the active generation and discards late results. Generated images are limited to 10 MiB in total before base64 encoding or publication.
 
 Image requests made through chat still receive Markdown image links plus an `artifacts` extension.
 
@@ -336,7 +345,7 @@ You can also run the Release workflow manually for an existing tag. Standalone b
 ## Boundaries
 
 - The Responses API and OpenAI function-call translation are not implemented.
-- Conversation state belongs to the client. Non-streaming requests use ephemeral `codex exec` without user config or project instructions. Streaming chat uses an ephemeral app-server thread with an empty working directory, disabled tools and read-only access.
+- Conversation state belongs to the client. Non-streaming requests without web search use ephemeral `codex exec` without user config or project instructions. Streaming chat and web research use an ephemeral app-server thread with an empty working directory and read-only access; only explicitly requested public web tools are enabled.
 - Browser requests are limited to loopback HTTP(S) origins unless explicitly allowlisted. Host checks reject DNS rebinding on loopback.
 - Chat prompts use stdin to support long conversations on Windows. Cancelling a request stops its CLI process.
 - SSE/NDJSON deliver actual answer deltas and public commentary. Public reasoning summaries depend on model availability; structured JSON content remains buffered until validation.

@@ -150,6 +150,31 @@ const headers = {
   "content-type": "application/json",
 };
 
+test("web search is opt-in in app-server for JSON and SSE, with genuine source metadata", async () => {
+  for (const stream of [false, true]) {
+    const response = await fetch(baseUrl + "/v1/chat/completions", {
+      method: "POST", headers,
+      body: JSON.stringify({ stream, tools: [{ type: "web_search" }], messages: [{ role: "user", content: "__DUMMY_WEB__" }] }),
+    });
+    expect(response.status).toBe(200);
+    const events = stream ? (await response.text()).split("\n\n").filter((part) => part.startsWith("data: {")).map((part) => JSON.parse(part.slice(6))) : [await response.json()];
+    const text = stream ? events.map((event) => event.choices?.[0]?.delta?.content ?? "").join("") : events[0].choices[0].message.content;
+    expect(JSON.parse(text)).toMatchObject({ command: "app-server", webSearch: "live" });
+    expect(events.at(-1).sources).toEqual([
+      { url: "https://docs.convex.dev/", title: "Convex documentation" },
+      { url: "https://docs.convex.dev/database", title: "docs.convex.dev" },
+    ]);
+  }
+  const disabled = await fetch(baseUrl + "/v1/chat/completions", {
+    method: "POST", headers,
+    body: JSON.stringify({ stream: true, messages: [{ role: "user", content: "__DUMMY_WEB__" }] }),
+  });
+  const events = (await disabled.text()).split("\n\n").filter((part) => part.startsWith("data: {")).map((part) => JSON.parse(part.slice(6)));
+  const text = events.map((event) => event.choices?.[0]?.delta?.content ?? "").join("");
+  expect(JSON.parse(text).webSearch).toBe("disabled");
+  expect(events.some((event) => event.sources)).toBe(false);
+});
+
 test("passes browser images as real local image inputs for exec and SSE, then cleans them", async () => {
   const image = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+afo4AAAAASUVORK5CYII=";
   for (const stream of [false, true]) {

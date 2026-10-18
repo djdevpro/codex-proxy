@@ -7,7 +7,7 @@ const MAX_BYTES = 10 * 1024 * 1024;
 export const ATTACHMENT_CAPABILITIES = Object.freeze({
   image_data_urls: true, text_files: true,
   image_media_types: ["image/png", "image/jpeg", "image/webp", "image/gif"],
-  file_media_types: ["text/plain"], max_file_bytes: MAX_BYTES, max_total_bytes: MAX_BYTES, max_files: 8,
+  file_media_types: ["text/plain"], max_file_bytes: MAX_BYTES, max_total_bytes: MAX_BYTES, max_files: 32,
 });
 
 function dataUrl(value: unknown): { mime: string; bytes: Buffer } {
@@ -37,7 +37,7 @@ export function attachmentParser() {
   let count = 0;
   let total = 0;
   const account = (size: number) => {
-    if (++count > ATTACHMENT_CAPABILITIES.max_files) throw new Error("At most 8 attachments are allowed per request.");
+    if (++count > ATTACHMENT_CAPABILITIES.max_files) throw new Error("At most 32 attachments are allowed per request.");
     total += size;
     if (total > MAX_BYTES) throw new Error("Attachments exceed the 10 MiB combined limit.");
   };

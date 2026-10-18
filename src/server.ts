@@ -10,6 +10,7 @@ import { createModelCatalogProvider, defaultModel, selectReasoningEffort, type C
 import type { CodexInput, CodexResult, CodexRunner, CompletionRequest, Message } from "./types";
 import { structuredOutput, validateJsonOutput } from "./structured-output";
 import { VERSION } from "./version";
+import { normalizeSources, TOOL_CAPABILITIES, webSearchRequested } from "./web-search";
 
 export interface ServerOptions { config: ProxyConfig; runner: CodexRunner; models?: ModelCatalogProvider }
 
@@ -64,6 +65,9 @@ async function completion(request: Request, endpoint: Endpoint, config: ProxyCon
 
   if (!body || typeof body !== "object" || Array.isArray(body)) return failure("Request body must be an object.", 400);
   if (body.stream !== undefined && typeof body.stream !== "boolean") return failure("stream must be a boolean.", 400);
+  let webSearch: boolean;
+  try { webSearch = webSearchRequested(body.tools); }
+  catch (error) { return failure(error instanceof Error ? error.message : String(error), 400); }
   let available: ModelCatalog;
   let fallback: string;
   try { available = await catalog(); fallback = defaultModel(available.models, config.defaultModel); }
@@ -89,7 +93,7 @@ async function completion(request: Request, endpoint: Endpoint, config: ProxyCon
   let format: ReturnType<typeof structuredOutput>;
   try { format = structuredOutput(body.response_format); }
   catch (error) { return failure(error instanceof Error ? error.message : String(error), 400); }
-  const input: CodexInput = { ...prepared, ...format, model, reasoningEffort, signal: request.signal };
+  const input: CodexInput = { ...prepared, ...format, model, reasoningEffort, signal: request.signal, webSearch };
   if (body.stream === true) return streamingResponse(endpoint, input, runner, artifacts, request.url);
 
   try {
@@ -97,7 +101,8 @@ async function completion(request: Request, endpoint: Endpoint, config: ProxyCon
     validateJsonOutput(result.content, input);
     const published = artifacts.publish(request.url, result.artifacts);
     const content = input.outputSchema || input.jsonObject ? result.content : contentWithArtifacts(result.content, published);
-    const extension = published.length > 0 ? { artifacts: published } : {};
+    const sources = webSearch ? normalizeSources(result.sources) : [];
+    const extension = { ...(published.length ? { artifacts: published } : {}), ...(sources.length ? { sources } : {}) };
     if (endpoint === "ollama-chat") return json({ model, message: { role: "assistant", content }, done: true, done_reason: "stop", ...extension });
     if (endpoint === "ollama-generate") return json({ model, response: content, done: true, done_reason: "stop", ...extension });
     return json({
@@ -132,10 +137,10 @@ export function createServer({ config, runner, models }: ServerOptions) {
   async function route(request: Request): Promise<Response> {
       const { pathname, searchParams } = new URL(request.url);
       if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS_HEADERS });
-      if (request.method === "GET" && pathname === "/health") return json({ ok: true, service: "codex-proxy", version: VERSION });
+      if (request.method === "GET" && pathname === "/health") return json({ ok: true, service: "codex-proxy", version: VERSION, capabilities: TOOL_CAPABILITIES });
       if (request.method === "GET" && pathname === "/v1/models") {
         const found = await catalog(searchParams.get("refresh") === "1");
-        const response = json({ object: "list", default_model: defaultModel(found.models, config.defaultModel), data: found.models.map(modelObject), source: "codex-app-server", fetched_at: new Date(found.fetchedAt).toISOString(), capabilities: ATTACHMENT_CAPABILITIES });
+        const response = json({ object: "list", default_model: defaultModel(found.models, config.defaultModel), data: found.models.map(modelObject), source: "codex-app-server", fetched_at: new Date(found.fetchedAt).toISOString(), capabilities: { ...ATTACHMENT_CAPABILITIES, ...TOOL_CAPABILITIES } });
         response.headers.set("cache-control", "no-store");
         return response;
       }

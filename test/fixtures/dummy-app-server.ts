@@ -29,6 +29,12 @@ export async function runDummyAppServer() {
         send({ id: request.id, result: { config: { mcp_servers: { fixture: { enabled: true, tool_timeout_sec: null }, "named.server": { enabled: true } } } } });
       } else if (request.method === "thread/start") {
         if (!params.ephemeral || params.sandbox !== "read-only" || params.modelProvider !== "openai" || params.approvalPolicy !== "never") throw new Error("Unsafe chat setup.");
+        const args = process.argv.slice(2);
+        const featureFlag = (flag: string, name: string) => args.some((arg, index) => arg === flag && args[index + 1] === name);
+        if (!featureFlag(params.config.web_search === "live" ? "--enable" : "--disable", "code_mode_host")) throw new Error("The public web tool requires its Code Mode host, enabled only for web requests.");
+        for (const feature of ["shell_tool", "apps", "plugins", "browser_use", "computer_use", "code_mode", "image_generation", "view_image"]) {
+          if (!featureFlag("--disable", feature)) throw new Error(`Unrelated feature must remain disabled: ${feature}`);
+        }
         if (params.config.mcp_servers.fixture.enabled !== false || params.config.mcp_servers['named.server'].enabled !== false) throw new Error("Inherited MCP must be disabled.");
         if (params.cwd !== process.cwd()) throw new Error("Working directory must be isolated.");
         thread = params;
@@ -53,6 +59,18 @@ export async function runDummyAppServer() {
           continue;
         }
         const notify = (method: string, extra: object) => send({ method, params: { threadId, turnId, ...extra } });
+        if (prompt.includes("__DUMMY_WEB__")) {
+          if (!["live", "disabled"].includes(thread.config.web_search)) throw new Error("Unexpected web search mode.");
+          if (thread.config.web_search === "live") {
+            if (!thread.baseInstructions.includes("public web search")) throw new Error("Web tools must be permitted in base instructions.");
+            notify("item/completed", { item: { type: "webSearch", id: "search", query: "Convex architecture", results: [
+              { url: "https://docs.convex.dev/", title: "Convex documentation" },
+              { url: "javascript:alert(1)", title: "unsafe" },
+            ] } });
+            notify("item/completed", { item: { type: "webSearch", id: "open", query: "", action: { type: "openPage", url: "https://docs.convex.dev/database" } } });
+            notify("item/completed", { item: { type: "webSearch", id: "find", query: "", action: { type: "findInPage", url: "https://docs.convex.dev/", pattern: "database" } } });
+          }
+        }
         notify("item/reasoning/textDelta", { itemId: "reason", delta: "private fixture reasoning" });
         notify("item/reasoning/summaryTextDelta", { itemId: "reason", summaryIndex: 0, delta: "Public " });
         notify("item/reasoning/summaryTextDelta", { itemId: "reason", summaryIndex: 0, delta: "summary." });
@@ -65,6 +83,7 @@ export async function runDummyAppServer() {
         const text = prompt.includes("__DUMMY_INVALID_JSON__") ? "invalid JSON" : JSON.stringify({
           provider: "dummy-codex", command: "app-server", model: thread.model, prompt,
           reasoningEffort: params.effort, outputSchema: params.outputSchema,
+          webSearch: thread.config.web_search,
           ...(prompt.includes("__DUMMY_ATTACHMENT__") ? {
             images: params.input.filter((part: { type: string }) => part.type === "localImage").map((part: { path: string }) => part.path),
             imageBytes: await Promise.all(params.input.filter((part: { type: string }) => part.type === "localImage").map(async (part: { path: string }) => (await Bun.file(part.path).arrayBuffer()).byteLength)),
